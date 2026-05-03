@@ -1,0 +1,14 @@
+{
+  "name": "rebol-ai-gateway",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "studio": "cd backend && npx prisma studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
