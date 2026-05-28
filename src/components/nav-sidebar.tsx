@@ -9,6 +9,7 @@ import { warmJson } from "@/lib/client/api-cache";
 const NAV_ITEMS = [
   { href: "/", label: "仪表盘", icon: "◉", api: ["/api/alerts", "/api/analytics?type=summary&period=monthly"] },
   { href: "/subscriptions", label: "订阅", icon: "◆", api: ["/api/subscriptions"] },
+  { href: "/account-pool", label: "账号池", icon: "⬡", api: ["/api/account-pool"] },
   { href: "/api-keys", label: "API 密钥", icon: "⚷", api: ["/api/api-keys", "/api/subscriptions", "/api/providers"] },
   { href: "/providers", label: "供应商", icon: "⊞", api: ["/api/providers"] },
   { href: "/models", label: "模型", icon: "⊓", api: ["/api/models"] },

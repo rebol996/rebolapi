@@ -21,6 +21,7 @@ export default async function DashboardPage() {
     { data: apiKeys },
     { data: endpoints },
     { data: alerts },
+    { data: accounts },
   ] = await Promise.all([
     supabase
       .from("subscriptions")
@@ -45,6 +46,10 @@ export default async function DashboardPage() {
       .eq("status", "open")
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase
+      .from("account_pool_items")
+      .select("id, status")
+      .eq("user_id", user.id),
   ]);
 
   const activeEndpoints = endpoints || [];
@@ -66,7 +71,8 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <StatCard label="账号池" value={String(accounts?.length || 0)} />
         <StatCard label="有效订阅" value={String(subscriptions?.length || 0)} />
         <StatCard label="有效 API 密钥" value={String(apiKeys?.length || 0)} />
         <StatCard label="可用端点" value={String(endpoints?.length || 0)} />

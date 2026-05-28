@@ -69,7 +69,13 @@ const LABELS: Record<string, string> = {
   reseller: "经销商",
   proxy: "中转站",
   shared_account: "共享账号",
+  shared: "共享账号",
   other: "其他",
+  api_key_only: "纯密钥",
+  needs_sync: "待同步",
+  sync_failed: "同步失败",
+  syncing: "同步中",
+  bearer_token: "Bearer Token",
 };
 
 export function labelFor(value: string | null | undefined): string {
