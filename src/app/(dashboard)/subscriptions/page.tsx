@@ -32,6 +32,7 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Subscription | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const emptyForm = { platform: "", plan_name: "", alias: "", account_label: "", price: "", currency: "USD", billing_cycle: "monthly", renewal_date: "", auto_renew: true, status: "active", quota_type: "unknown", quota_total: "", quota_used: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
@@ -46,6 +47,7 @@ export default function SubscriptionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     const body: Record<string, unknown> = {
       platform: form.platform,
       plan_name: form.plan_name,
@@ -62,19 +64,27 @@ export default function SubscriptionsPage() {
       quota_used: form.quota_used ? Number(form.quota_used) : null,
       notes: form.notes || null,
     };
-    if (editing) {
-      await fetch(`/api/subscriptions/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    } else {
-      await fetch("/api/subscriptions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    try {
+      const url = editing ? `/api/subscriptions/${editing.id}` : "/api/subscriptions";
+      const method = editing ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const json = await res.json();
+      if (json.error) {
+        setFormError(json.error);
+        return;
+      }
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyForm);
+      load(true);
+    } catch (err) {
+      setFormError("请求失败：" + String(err));
     }
-    setShowForm(false);
-    setEditing(null);
-    setForm(emptyForm);
-    load(true);
   };
 
   const handleEdit = (s: Subscription) => {
     setEditing(s);
+    setFormError(null);
     setForm({
       platform: s.platform, plan_name: s.plan_name, alias: s.alias || "", account_label: s.account_label || "",
       price: s.price?.toString() || "", currency: s.currency, billing_cycle: s.billing_cycle,
@@ -97,11 +107,12 @@ export default function SubscriptionsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">订阅</h1>
-        <button onClick={() => { setForm(emptyForm); setEditing(null); setShowForm(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">添加订阅</button>
+        <button onClick={() => { setForm(emptyForm); setEditing(null); setFormError(null); setShowForm(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">添加订阅</button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+          {formError && <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{formError}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">平台名称 *</label><input value={form.platform} onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" placeholder="如 OpenAI" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">套餐名称 *</label><input value={form.plan_name} onChange={(e) => setForm((f) => ({ ...f, plan_name: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" placeholder="如 Pro" /></div>
