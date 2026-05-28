@@ -3,13 +3,5 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm install",
-  "regions": ["iad1"],
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key",
-    "SUPABASE_SERVICE_ROLE_KEY": "@supabase-service-key",
-    "ALLOWED_EMAIL": "@allowed-email",
-    "ALLOWED_ORIGINS": "@allowed-origins",
-    "API_KEY_ENCRYPTION_SECRET": "@encryption-secret"
-  }
+  "regions": ["iad1"]
 }
