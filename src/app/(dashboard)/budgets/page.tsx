@@ -71,7 +71,7 @@ export default function BudgetsPage() {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">范围</label><select value={form.scope} onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">{SCOPES.map((s) => <option key={s} value={s}>{labelFor(s)}</option>)}</select></div>
             <div><label className="block text-xs text-gray-400 mb-1">金额</label><input type="number" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">周期</label><select value={form.period} onChange={(e) => setForm((f) => ({ ...f, period: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">{PERIODS.map((p) => <option key={p} value={p}>{labelFor(p)}</option>)}</select></div>

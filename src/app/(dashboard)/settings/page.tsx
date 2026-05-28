@@ -5,6 +5,11 @@ import { NotificationSettings } from "@/components/notification-settings";
 
 export default function SettingsPage() {
   const [email, setEmail] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [editName, setEditName] = useState("");
+  const [nameLoading, setNameLoading] = useState(false);
+  const [nameMessage, setNameMessage] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [exportType, setExportType] = useState("full");
   const [exportFormat, setExportFormat] = useState("json");
   const [startDate, setStartDate] = useState("");
@@ -22,10 +27,42 @@ export default function SettingsPage() {
   useEffect(() => {
     import("@/lib/supabase/client").then(({ createClient }) => {
       createClient().auth.getUser().then(({ data }) => {
-        if (data.user) setEmail(data.user.email || "");
+        if (data.user) {
+          setEmail(data.user.email || "");
+          const name = (data.user.user_metadata?.name as string) || (data.user.user_metadata?.full_name as string) || "";
+          setAccountName(name);
+          setEditName(name);
+        }
       });
     });
   }, []);
+
+  const handleNameUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNameMessage(null);
+    setNameError(null);
+
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setNameError("账号名不能为空。");
+      return;
+    }
+
+    setNameLoading(true);
+    const { createClient } = await import("@/lib/supabase/client");
+    const { error } = await createClient().auth.updateUser({
+      data: { name: trimmed, full_name: trimmed },
+    });
+    setNameLoading(false);
+
+    if (error) {
+      setNameError(error.message);
+      return;
+    }
+
+    setAccountName(trimmed);
+    setNameMessage("账号名已更新。");
+  };
 
   const handleSignOut = async () => {
     const { createClient } = await import("@/lib/supabase/client");
@@ -136,7 +173,28 @@ export default function SettingsPage() {
           <label className="block text-xs text-gray-400 mb-1">邮箱</label>
           <div className="text-white">{email || "加载中..."}</div>
         </div>
-        <form onSubmit={handlePasswordUpdate} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+        <form onSubmit={handleNameUpdate} className="flex flex-col sm:flex-row gap-3 items-end">
+          <div className="flex-1 w-full">
+            <label className="block text-xs text-gray-400 mb-1">账号名</label>
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+              placeholder="输入账号名"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={nameLoading || editName.trim() === accountName}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-blue-300/50 text-white rounded text-sm whitespace-nowrap"
+          >
+            {nameLoading ? "保存中..." : "保存账号名"}
+          </button>
+        </form>
+        {nameError && <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{nameError}</div>}
+        {nameMessage && <div className="bg-green-900/30 border border-green-800 rounded p-3 text-sm text-green-300">{nameMessage}</div>}
+        <form onSubmit={handlePasswordUpdate} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
           <div>
             <label className="block text-xs text-gray-400 mb-1">新密码</label>
             <input
@@ -160,7 +218,7 @@ export default function SettingsPage() {
           <button
             type="submit"
             disabled={passwordLoading || !newPassword || !confirmPassword}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-blue-300/50 text-white rounded text-sm"
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-blue-300/50 text-white rounded text-sm whitespace-nowrap"
           >
             {passwordLoading ? "更新中..." : "修改密码"}
           </button>
@@ -172,8 +230,8 @@ export default function SettingsPage() {
 
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
         <h2 className="text-white font-medium">导出数据</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-gray-400 mb-1">导出类型</label>
             <select value={exportType} onChange={(e) => setExportType(e.target.value)} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">
@@ -216,7 +274,7 @@ export default function SettingsPage() {
                 className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
               />
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               <button onClick={setLast7Days} className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">7 天</button>
               <button onClick={setLast30Days} className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">30 天</button>
               <button onClick={clearDates} className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">清空</button>
@@ -253,10 +311,10 @@ export default function SettingsPage() {
           <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{importError}</div>
         )}
 
-        <div className="flex gap-3 items-end">
-          <div>
+        <div className="flex flex-col sm:flex-row gap-3 items-end">
+          <div className="w-full sm:w-auto">
             <label className="block text-xs text-gray-400 mb-1">导入类型</label>
-            <select value={exportType} onChange={(e) => setExportType(e.target.value)} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">
+            <select value={exportType} onChange={(e) => setExportType(e.target.value)} className="w-full sm:w-auto px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">
               <option value="full">完整恢复</option>
               <option value="subscriptions">订阅</option>
               <option value="prompt_templates">提示词模板</option>

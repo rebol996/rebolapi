@@ -48,6 +48,7 @@ export default async function DashboardPage() {
   ]);
 
   const activeEndpoints = endpoints || [];
+  const accountName = (user.user_metadata?.name as string) || (user.user_metadata?.full_name as string) || user.email;
   const totalHealth = activeEndpoints.length > 0
     ? activeEndpoints.reduce((sum: number, e: Record<string, unknown>) => sum + (e.health_score as number || 0), 0) / activeEndpoints.length
     : 0;
@@ -61,7 +62,7 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-bold text-white">仪表盘</h1>
         <div className="flex items-center gap-3">
           <AlertCheckButton />
-          <span className="text-sm text-gray-500">{user.email}</span>
+          <span className="text-sm text-gray-500">{accountName}</span>
         </div>
       </div>
 

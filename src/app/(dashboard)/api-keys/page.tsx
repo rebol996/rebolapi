@@ -116,7 +116,7 @@ export default function ApiKeysPage() {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">密钥别名</label><input value={form.key_alias} onChange={(e) => setForm((f) => ({ ...f, key_alias: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">{editing ? "新密钥（留空则保持不变）" : "API 密钥"}</label><input value={form.plaintext_key} onChange={(e) => setForm((f) => ({ ...f, plaintext_key: e.target.value }))} required={!editing} type="password" className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">供应商</label><select value={form.provider_id} onChange={(e) => setForm((f) => ({ ...f, provider_id: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"><option value="">选择供应商</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>

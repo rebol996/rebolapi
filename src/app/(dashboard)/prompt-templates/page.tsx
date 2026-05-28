@@ -85,7 +85,7 @@ export default function PromptTemplatesPage() {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">名称</label><input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">任务类型</label><select value={form.task_type} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">{TASK_TYPES.map((t) => <option key={t} value={t}>{labelFor(t)}</option>)}</select></div>
             <div><label className="block text-xs text-gray-400 mb-1">策略</label><select value={form.default_strategy} onChange={(e) => setForm((f) => ({ ...f, default_strategy: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">{STRATEGIES.map((s) => <option key={s} value={s}>{labelFor(s)}</option>)}</select></div>
