@@ -25,32 +25,64 @@ interface ModelEndpoint {
 export default function ModelEndpointsPage() {
   const [items, setItems] = useState<ModelEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async (force = false) => {
-    const json = await cachedJson<{ data?: ModelEndpoint[] }>("/api/model-endpoints", { force });
-    setItems(json.data || []);
-    setLoading(false);
+    try {
+      setLoadError(null);
+      const json = await cachedJson<{ data?: ModelEndpoint[] }>("/api/model-endpoints", { force });
+      setItems(json.data || []);
+    } catch (err) {
+      setLoadError("加载端点失败：" + String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   const handleToggle = async (id: string, enabled: boolean) => {
-    await fetch(`/api/model-endpoints/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: !enabled }),
-    });
-    load(true);
+    try {
+      const res = await fetch(`/api/model-endpoints/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !enabled }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert("操作失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      alert("操作失败：" + String(err));
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除？")) return;
-    await fetch(`/api/model-endpoints/${id}`, { method: "DELETE" });
-    load(true);
+    try {
+      const res = await fetch(`/api/model-endpoints/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert("删除失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      alert("删除失败：" + String(err));
+    }
   };
 
   if (loading) return <div className="text-gray-400">加载中...</div>;
+  if (loadError) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-white">模型端点</h1>
+      <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{loadError}</div>
+      <button onClick={() => load(true)} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">重试</button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">

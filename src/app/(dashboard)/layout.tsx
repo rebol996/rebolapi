@@ -27,7 +27,7 @@ export default function DashboardLayout({
     <div className={`${geistSans.variable} ${geistMono.variable} flex min-h-screen`}>
       <NavSidebar />
       <main className="flex-1 overflow-y-auto min-w-0">
-        <div className="p-4 lg:p-6 max-w-7xl mx-auto">{children}</div>
+        <div className="pt-12 lg:pt-0 p-4 lg:p-6 max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
   );

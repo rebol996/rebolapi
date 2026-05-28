@@ -24,11 +24,18 @@ interface Model {
 export default function ModelsPage() {
   const [items, setItems] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async (force = false) => {
-    const json = await cachedJson<{ data?: Model[] }>("/api/models", { force });
-    setItems(json.data || []);
-    setLoading(false);
+    try {
+      setLoadError(null);
+      const json = await cachedJson<{ data?: Model[] }>("/api/models", { force });
+      setItems(json.data || []);
+    } catch (err) {
+      setLoadError("加载模型失败：" + String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -36,16 +43,32 @@ export default function ModelsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除？")) return;
-    await fetch(`/api/models/${id}`, { method: "DELETE" });
-    load(true);
+    try {
+      const res = await fetch(`/api/models/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert("删除失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      alert("删除失败：" + String(err));
+    }
   };
 
   if (loading) return <div className="text-gray-400">加载中...</div>;
+  if (loadError) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-white">模型</h1>
+      <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{loadError}</div>
+      <button onClick={() => load(true)} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">重试</button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-white">模型</h1>
-      <p className="text-sm text-gray-500">模型通过 API 密钥自动发现。请先添加供应商和 API 密钥，然后使用“发现模型”。</p>
+      <p className="text-sm text-gray-500">模型通过 API 密钥自动发现。请先添加供应商和 API 密钥，然后使用&ldquo;发现模型&rdquo;。</p>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

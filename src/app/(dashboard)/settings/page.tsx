@@ -71,6 +71,7 @@ export default function SettingsPage() {
 
     setAccountName(trimmed);
     setNameMessage("账号名已更新。");
+    window.dispatchEvent(new Event("account-name-updated"));
   };
 
   const handleSignOut = async () => {

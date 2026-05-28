@@ -1,15 +1,26 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const PUBLIC_PAGES = ["/auth/login", "/auth/callback"];
+const PUBLIC_API_PATHS = ["/api/health", "/api/gateway/chat"];
+
+function isPublicPath(path: string): boolean {
+  if (PUBLIC_PAGES.includes(path)) return true;
+  if (PUBLIC_API_PATHS.includes(path)) return true;
+  return false;
+}
+
+function isApiPath(path: string): boolean {
+  return path.startsWith("/api/");
+}
+
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  const publicPaths = ["/auth/login", "/auth/callback", "/api/gateway", "/api/health"];
-  const isPublicPath = publicPaths.some((p) => path.startsWith(p));
 
   let supabaseResponse = NextResponse.next({ request });
   supabaseResponse = applyCorsHeaders(request, supabaseResponse);
 
-  if (request.method === "OPTIONS" && path.startsWith("/api/")) {
+  if (request.method === "OPTIONS" && isApiPath(path)) {
     return applyCorsHeaders(request, new NextResponse(null, { status: 204 }));
   }
 
@@ -40,7 +51,10 @@ export async function middleware(request: NextRequest) {
 
   const allowedEmail = process.env.ALLOWED_EMAIL;
 
-  if (!user && !isPublicPath) {
+  if (!user && !isPublicPath(path)) {
+    if (isApiPath(path)) {
+      return applyCorsHeaders(request, NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return applyCorsHeaders(request, NextResponse.redirect(url));
@@ -48,13 +62,16 @@ export async function middleware(request: NextRequest) {
 
   if (user && allowedEmail && user.email !== allowedEmail) {
     await supabase.auth.signOut();
+    if (isApiPath(path)) {
+      return applyCorsHeaders(request, NextResponse.json({ error: "Forbidden" }, { status: 403 }));
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     url.searchParams.set("error", "access_denied");
     return applyCorsHeaders(request, NextResponse.redirect(url));
   }
 
-  if (user && isPublicPath && user.email === allowedEmail) {
+  if (user && isPublicPath(path) && user.email === allowedEmail) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return applyCorsHeaders(request, NextResponse.redirect(url));
@@ -64,7 +81,7 @@ export async function middleware(request: NextRequest) {
 }
 
 function applyCorsHeaders(request: NextRequest, response: NextResponse): NextResponse {
-  if (!request.nextUrl.pathname.startsWith("/api/")) {
+  if (!isApiPath(request.nextUrl.pathname)) {
     return response;
   }
 

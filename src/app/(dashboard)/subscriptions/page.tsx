@@ -33,13 +33,20 @@ export default function SubscriptionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Subscription | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const emptyForm = { platform: "", plan_name: "", alias: "", account_label: "", price: "", currency: "USD", billing_cycle: "monthly", renewal_date: "", auto_renew: true, status: "active", quota_type: "unknown", quota_total: "", quota_used: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async (force = false) => {
-    const json = await cachedJson<{ data?: Subscription[] }>("/api/subscriptions", { force });
-    setItems(json.data || []);
-    setLoading(false);
+    try {
+      setLoadError(null);
+      const json = await cachedJson<{ data?: Subscription[] }>("/api/subscriptions", { force });
+      setItems(json.data || []);
+    } catch (err) {
+      setLoadError("加载订阅失败：" + String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -97,11 +104,27 @@ export default function SubscriptionsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除该订阅？此操作不可撤销。")) return;
-    await fetch(`/api/subscriptions/${id}`, { method: "DELETE" });
-    load(true);
+    try {
+      const res = await fetch(`/api/subscriptions/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert("删除失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      alert("删除失败：" + String(err));
+    }
   };
 
   if (loading) return <div className="text-gray-400">加载中...</div>;
+  if (loadError) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-white">订阅</h1>
+      <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{loadError}</div>
+      <button onClick={() => { setLoading(true); load(true); }} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">重试</button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">

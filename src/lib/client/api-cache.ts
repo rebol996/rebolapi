@@ -19,7 +19,23 @@ export async function cachedJson<T>(path: string, options: { force?: boolean; tt
   }
 
   const request = fetch(path)
-    .then((res) => res.json())
+    .then(async (res) => {
+      const contentType = res.headers.get("content-type") || "";
+      if (!res.ok) {
+        let errorMsg = `请求失败 (${res.status})`;
+        if (contentType.includes("application/json")) {
+          try {
+            const errBody = await res.json();
+            errorMsg = errBody.error || errBody.message || errorMsg;
+          } catch { /* ignore parse error */ }
+        }
+        throw new Error(errorMsg);
+      }
+      if (!contentType.includes("application/json")) {
+        throw new Error("响应格式错误：服务器未返回 JSON");
+      }
+      return res.json();
+    })
     .then((data) => {
       cache.set(path, {
         data,

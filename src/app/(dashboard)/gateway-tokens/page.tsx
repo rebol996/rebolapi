@@ -17,14 +17,24 @@ interface GatewayToken {
 export default function GatewayTokensPage() {
   const [items, setItems] = useState<GatewayToken[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", scopes: "chat:write", rate_limit_per_minute: "" });
 
   const load = async (force = false) => {
-    const json = await cachedJson<{ data?: GatewayToken[] }>("/api/gateway-tokens", { force });
-    setItems(json.data || []);
-    setLoading(false);
+    try {
+      setLoadError(null);
+      const json = await cachedJson<{ data?: GatewayToken[] }>("/api/gateway-tokens", { force });
+      setItems(json.data || []);
+    } catch (err) {
+      setLoadError("加载网关令牌失败：" + String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -32,41 +42,71 @@ export default function GatewayTokensPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/gateway-tokens", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.name,
-        scopes: form.scopes.split(",").map((s) => s.trim()),
-        rate_limit_per_minute: form.rate_limit_per_minute ? Number(form.rate_limit_per_minute) : null,
-      }),
-    });
-    const json = await res.json();
-    if (json.data?.token) {
-      setNewToken(json.data.token);
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      const scopes = form.scopes.trim() ? form.scopes.split(",").map((s) => s.trim()).filter(Boolean) : ["chat:write"];
+      const res = await fetch("/api/gateway-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          scopes,
+          rate_limit_per_minute: form.rate_limit_per_minute ? Number(form.rate_limit_per_minute) : null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setFormError(json.error || "创建令牌失败");
+        return;
+      }
+      if (json.data?.token) {
+        setNewToken(json.data.token);
+      }
+      setShowForm(false);
+      setForm({ name: "", scopes: "chat:write", rate_limit_per_minute: "" });
+      load(true);
+    } catch (err) {
+      setFormError("创建令牌失败：" + String(err));
+    } finally {
+      setSubmitting(false);
     }
-    setShowForm(false);
-    setForm({ name: "", scopes: "chat:write", rate_limit_per_minute: "" });
-    load(true);
   };
 
   const handleRevoke = async (id: string) => {
     if (!confirm("确定撤销这个令牌？")) return;
-    await fetch(`/api/gateway-tokens/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "revoked" }),
-    });
-    load(true);
+    setRevokeError(null);
+    try {
+      const res = await fetch(`/api/gateway-tokens/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "revoked" }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setRevokeError("撤销失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      setRevokeError("撤销失败：" + String(err));
+    }
   };
 
   if (loading) return <div className="text-gray-400">加载中...</div>;
+  if (loadError) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-white">网关令牌</h1>
+      <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{loadError}</div>
+      <button onClick={() => load(true)} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">重试</button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">网关令牌</h1>
-        <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">创建令牌</button>
+        <button onClick={() => { setFormError(null); setShowForm(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">创建令牌</button>
       </div>
 
       {newToken && (
@@ -77,15 +117,20 @@ export default function GatewayTokensPage() {
         </div>
       )}
 
+      {revokeError && (
+        <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{revokeError}</div>
+      )}
+
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+          {formError && <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{formError}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">名称</label><input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
-            <div><label className="block text-xs text-gray-400 mb-1">权限范围（逗号分隔）</label><input value={form.scopes} onChange={(e) => setForm((f) => ({ ...f, scopes: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
-            <div><label className="block text-xs text-gray-400 mb-1">每分钟限制</label><input type="number" value={form.rate_limit_per_minute} onChange={(e) => setForm((f) => ({ ...f, rate_limit_per_minute: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
+            <div><label className="block text-xs text-gray-400 mb-1">权限范围（逗号分隔）</label><input value={form.scopes} onChange={(e) => setForm((f) => ({ ...f, scopes: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" placeholder="chat:write" /></div>
+            <div><label className="block text-xs text-gray-400 mb-1">每分钟限制</label><input type="number" value={form.rate_limit_per_minute} onChange={(e) => setForm((f) => ({ ...f, rate_limit_per_minute: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" placeholder="不限制" /></div>
           </div>
-          <div className="flex gap-2">
-            <button type="submit" className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">创建</button>
+          <div className="flex gap-2 flex-wrap">
+            <button type="submit" disabled={submitting} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 text-white rounded text-sm">{submitting ? "创建中..." : "创建"}</button>
             <button type="button" onClick={() => setShowForm(false)} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">取消</button>
           </div>
         </form>
@@ -93,16 +138,18 @@ export default function GatewayTokensPage() {
 
       <div className="space-y-2">
         {items.map((t) => (
-          <div key={t.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">{t.name}</div>
-              <div className="text-xs text-gray-500">{t.scopes.join(", ")} &middot; {t.rate_limit_per_minute ? `${t.rate_limit_per_minute}/分钟` : "不限制"}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs px-1.5 py-0.5 rounded ${t.status === "active" ? "bg-green-900/50 text-green-300" : "bg-red-900/50 text-red-300"}`}>{labelFor(t.status)}</span>
-              {t.status === "active" && (
-                <button onClick={() => handleRevoke(t.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">撤销</button>
-              )}
+          <div key={t.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-white font-medium">{t.name}</div>
+                <div className="text-xs text-gray-500">{t.scopes.join(", ")} &middot; {t.rate_limit_per_minute ? `${t.rate_limit_per_minute}/分钟` : "不限制"}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs px-1.5 py-0.5 rounded ${t.status === "active" ? "bg-green-900/50 text-green-300" : "bg-red-900/50 text-red-300"}`}>{labelFor(t.status)}</span>
+                {t.status === "active" && (
+                  <button onClick={() => handleRevoke(t.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">撤销</button>
+                )}
+              </div>
             </div>
           </div>
         ))}

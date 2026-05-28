@@ -28,14 +28,22 @@ const DEFAULT_ENDPOINTS: Record<string, { models: string; chat: string; auth: st
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Provider | null>(null);
   const [form, setForm] = useState({ name: "", slug: "", provider_type: "openai_compatible", base_url: "", models_endpoint: "/v1/models", chat_endpoint: "/v1/chat/completions", auth_type: "bearer", status: "active", notes: "" });
 
   const load = async (force = false) => {
-    const json = await cachedJson<{ data?: Provider[] }>("/api/providers", { force });
-    setProviders(json.data || []);
-    setLoading(false);
+    try {
+      setLoadError(null);
+      const json = await cachedJson<{ data?: Provider[] }>("/api/providers", { force });
+      setProviders(json.data || []);
+    } catch (err) {
+      setLoadError("加载供应商失败：" + String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -48,42 +56,68 @@ export default function ProvidersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editing) {
-      await fetch(`/api/providers/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    } else {
-      await fetch("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    setFormError(null);
+    try {
+      const url = editing ? `/api/providers/${editing.id}` : "/api/providers";
+      const method = editing ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setFormError(json.error || "保存供应商失败");
+        return;
+      }
+      setShowForm(false);
+      setEditing(null);
+      resetForm();
+      load(true);
+    } catch (err) {
+      setFormError("保存供应商失败：" + String(err));
     }
-    setShowForm(false);
-    setEditing(null);
-    resetForm();
-    load(true);
   };
 
   const handleEdit = (p: Provider) => {
     setEditing(p);
+    setFormError(null);
     setForm({ name: p.name, slug: p.slug, provider_type: p.provider_type, base_url: p.base_url, models_endpoint: p.models_endpoint, chat_endpoint: p.chat_endpoint, auth_type: p.auth_type, status: p.status, notes: p.notes || "" });
     setShowForm(true);
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除这个供应商？")) return;
-    await fetch(`/api/providers/${id}`, { method: "DELETE" });
-    load(true);
+    try {
+      const res = await fetch(`/api/providers/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert("删除失败：" + (json.error || "未知错误"));
+        return;
+      }
+      load(true);
+    } catch (err) {
+      alert("删除失败：" + String(err));
+    }
   };
 
   const resetForm = () => setForm({ name: "", slug: "", provider_type: "openai_compatible", base_url: "", models_endpoint: "/v1/models", chat_endpoint: "/v1/chat/completions", auth_type: "bearer", status: "active", notes: "" });
 
   if (loading) return <div className="text-gray-400">加载中...</div>;
+  if (loadError) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-white">供应商</h1>
+      <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{loadError}</div>
+      <button onClick={() => load(true)} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">重试</button>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">供应商</h1>
-        <button onClick={() => { resetForm(); setEditing(null); setShowForm(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">添加供应商</button>
+        <button onClick={() => { resetForm(); setEditing(null); setFormError(null); setShowForm(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">添加供应商</button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+          {formError && <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{formError}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className="block text-xs text-gray-400 mb-1">名称</label><input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">标识</label><input value={form.slug} onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
@@ -93,7 +127,7 @@ export default function ProvidersPage() {
             <div><label className="block text-xs text-gray-400 mb-1">聊天端点</label><input value={form.chat_endpoint} onChange={(e) => setForm((f) => ({ ...f, chat_endpoint: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
           </div>
           <div><label className="block text-xs text-gray-400 mb-1">备注</label><textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" rows={2} /></div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button type="submit" className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">{editing ? "更新" : "创建"}</button>
             <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm">取消</button>
           </div>
@@ -102,14 +136,16 @@ export default function ProvidersPage() {
 
       <div className="space-y-2">
         {providers.map((p) => (
-          <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">{p.name}</div>
-              <div className="text-xs text-gray-500">{p.provider_type} &middot; {p.base_url}</div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => handleEdit(p)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">编辑</button>
-              <button onClick={() => handleDelete(p.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">删除</button>
+          <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-white font-medium">{p.name}</div>
+                <div className="text-xs text-gray-500">{p.provider_type} &middot; {p.base_url}</div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => handleEdit(p)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">编辑</button>
+                <button onClick={() => handleDelete(p.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">删除</button>
+              </div>
             </div>
           </div>
         ))}
