@@ -9,6 +9,11 @@ export default function SettingsPage() {
   const [exportFormat, setExportFormat] = useState("json");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<Record<string, { imported: number; errors: number; skipped: number }> | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -26,6 +31,36 @@ export default function SettingsPage() {
     const { createClient } = await import("@/lib/supabase/client");
     await createClient().auth.signOut();
     window.location.href = "/auth/login";
+  };
+
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMessage(null);
+    setPasswordError(null);
+
+    if (newPassword.length < 8) {
+      setPasswordError("新密码至少需要 8 位。");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("两次输入的密码不一致。");
+      return;
+    }
+
+    setPasswordLoading(true);
+    const { createClient } = await import("@/lib/supabase/client");
+    const { error } = await createClient().auth.updateUser({ password: newPassword });
+    setPasswordLoading(false);
+
+    if (error) {
+      setPasswordError(error.message);
+      return;
+    }
+
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordMessage("密码已更新，下次登录请使用新密码。");
   };
 
   const handleExport = () => {
@@ -101,6 +136,37 @@ export default function SettingsPage() {
           <label className="block text-xs text-gray-400 mb-1">邮箱</label>
           <div className="text-white">{email || "加载中..."}</div>
         </div>
+        <form onSubmit={handlePasswordUpdate} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">新密码</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+              placeholder="至少 8 位"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">确认新密码</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
+              placeholder="再次输入"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={passwordLoading || !newPassword || !confirmPassword}
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-blue-300/50 text-white rounded text-sm"
+          >
+            {passwordLoading ? "更新中..." : "修改密码"}
+          </button>
+        </form>
+        {passwordError && <div className="bg-red-900/30 border border-red-800 rounded p-3 text-sm text-red-300">{passwordError}</div>}
+        {passwordMessage && <div className="bg-green-900/30 border border-green-800 rounded p-3 text-sm text-green-300">{passwordMessage}</div>}
         <button onClick={handleSignOut} className="px-4 py-2 bg-red-900/50 hover:bg-red-800/50 text-red-300 rounded text-sm">退出登录</button>
       </div>
 
