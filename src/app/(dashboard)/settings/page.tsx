@@ -3,6 +3,15 @@
 import { useState, useEffect, useRef } from "react";
 import { NotificationSettings } from "@/components/notification-settings";
 
+const authErrorMessage = (message: string) => {
+  if (message.includes("New password should be different from the old password")) return "新密码不能和旧密码相同。";
+  if (message.includes("Password should be at least")) return "新密码长度不符合要求。";
+  if (message.includes("Auth session missing")) return "登录状态已失效，请重新登录。";
+  if (message.includes("Invalid login credentials")) return "邮箱或密码不正确。";
+  if (message.includes("Email rate limit exceeded")) return "邮件发送太频繁，请稍后再试。";
+  return message;
+};
+
 export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -56,7 +65,7 @@ export default function SettingsPage() {
     setNameLoading(false);
 
     if (error) {
-      setNameError(error.message);
+      setNameError(authErrorMessage(error.message));
       return;
     }
 
@@ -91,7 +100,7 @@ export default function SettingsPage() {
     setPasswordLoading(false);
 
     if (error) {
-      setPasswordError(error.message);
+      setPasswordError(authErrorMessage(error.message));
       return;
     }
 
