@@ -128,7 +128,7 @@ export default function ModelEndpointsPage() {
             ))}
           </tbody>
         </table>
-        {items.length === 0 && <p className="text-gray-500 text-sm mt-4">暂无端点。请先从 API 密钥发现模型。</p>}
+        {items.length === 0 && <p className="text-gray-500 text-sm mt-4">暂无端点。请在 API 密钥页重新发现模型。</p>}
       </div>
     </div>
   );
