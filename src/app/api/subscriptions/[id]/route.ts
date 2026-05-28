@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+const SELECT_FIELDS = "id, user_id, platform, plan_name, alias, account_label, source_type, vendor_url, console_url, price, currency, billing_cycle, purchase_date, renewal_date, expires_at, auto_renew, status, quota_type, quota_total, quota_used, tags, notes, created_at, updated_at";
+
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -9,7 +11,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, user_id, platform, plan_name, alias, account_label, price, currency, billing_cycle, renewal_date, auto_renew, status, quota_type, quota_total, quota_used, notes, created_at, updated_at")
+    .select(SELECT_FIELDS)
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
@@ -30,7 +32,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     .update(body)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, user_id, platform, plan_name, alias, account_label, price, currency, billing_cycle, renewal_date, auto_renew, status, quota_type, quota_total, quota_used, notes, created_at, updated_at")
+    .select(SELECT_FIELDS)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -18,7 +18,7 @@ interface ApiKey {
   notes: string | null;
 }
 
-interface Subscription { id: string; plan_name: string; alias: string | null; platform: string }
+interface Subscription { id: string; plan_name: string; alias: string | null; platform: string; source_type: string; price: number | null; currency: string }
 interface Provider { id: string; name: string; slug: string }
 
 export default function ApiKeysPage() {
@@ -129,6 +129,12 @@ export default function ApiKeysPage() {
     setShowForm(true);
   };
 
+  const getSubLabel = (subId: string) => {
+    const sub = subscriptions.find((s) => s.id === subId);
+    if (!sub) return null;
+    return sub;
+  };
+
   if (loading) return <div className="text-gray-400">加载中...</div>;
   if (loadError) return (
     <div className="space-y-4">
@@ -159,7 +165,13 @@ export default function ApiKeysPage() {
             <div><label className="block text-xs text-gray-400 mb-1">密钥别名</label><input value={form.key_alias} onChange={(e) => setForm((f) => ({ ...f, key_alias: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">{editing ? "新密钥（留空则保持不变）" : "API 密钥"}</label><input value={form.plaintext_key} onChange={(e) => setForm((f) => ({ ...f, plaintext_key: e.target.value }))} required={!editing} type="password" className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">供应商</label><select value={form.provider_id} onChange={(e) => setForm((f) => ({ ...f, provider_id: e.target.value }))} required className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"><option value="">选择供应商</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-            <div><label className="block text-xs text-gray-400 mb-1">订阅</label><select value={form.subscription_id} onChange={(e) => setForm((f) => ({ ...f, subscription_id: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"><option value="">无</option>{subscriptions.map((s) => <option key={s.id} value={s.id}>{s.alias || `${s.platform} - ${s.plan_name}`}</option>)}</select></div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">关联订阅</label>
+              <select value={form.subscription_id} onChange={(e) => setForm((f) => ({ ...f, subscription_id: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm">
+                <option value="">无</option>
+                {subscriptions.map((s) => <option key={s.id} value={s.id}>[{labelFor(s.source_type)}] {s.alias || `${s.platform} - ${s.plan_name}`}{s.price != null ? ` (${s.currency} ${s.price})` : ""}</option>)}
+              </select>
+            </div>
             <div><label className="block text-xs text-gray-400 mb-1">覆盖 Base URL</label><input value={form.base_url} onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))} placeholder="默认使用供应商配置" className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
             <div><label className="block text-xs text-gray-400 mb-1">月度预算</label><input type="number" step="0.01" value={form.monthly_budget} onChange={(e) => setForm((f) => ({ ...f, monthly_budget: e.target.value }))} className="w-full px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm" /></div>
           </div>
@@ -172,23 +184,32 @@ export default function ApiKeysPage() {
       )}
 
       <div className="space-y-2">
-        {items.map((k) => (
-          <div key={k.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="text-white font-medium">{k.key_alias}</div>
-                <div className="text-xs text-gray-500 font-mono">{k.key_preview} &middot; {labelFor(k.status)}</div>
-              </div>
-              <div className="flex gap-2 shrink-0 flex-wrap">
-                <button onClick={() => handleDiscover(k.id)} disabled={discovering === k.id} className="px-3 py-1 bg-green-900/50 hover:bg-green-800/50 text-green-300 rounded text-xs disabled:opacity-50">
-                  {discovering === k.id ? "发现中..." : "发现模型"}
-                </button>
-                <button onClick={() => handleEdit(k)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">编辑</button>
-                <button onClick={() => handleDelete(k.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">删除</button>
+        {items.map((k) => {
+          const sub = getSubLabel(k.subscription_id);
+          return (
+            <div key={k.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-white font-medium">{k.key_alias}</div>
+                  <div className="text-xs text-gray-500 font-mono">{k.key_preview} &middot; {labelFor(k.status)}</div>
+                  {sub && (
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      订阅: <span className="text-gray-400">[{labelFor(sub.source_type)}] {sub.alias || `${sub.platform} - ${sub.plan_name}`}</span>
+                      {sub.price != null && <span className="text-gray-500"> ({sub.currency} {sub.price})</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0 flex-wrap">
+                  <button onClick={() => handleDiscover(k.id)} disabled={discovering === k.id} className="px-3 py-1 bg-green-900/50 hover:bg-green-800/50 text-green-300 rounded text-xs disabled:opacity-50">
+                    {discovering === k.id ? "发现中..." : "发现模型"}
+                  </button>
+                  <button onClick={() => handleEdit(k)} className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">编辑</button>
+                  <button onClick={() => handleDelete(k.id)} className="px-3 py-1 bg-gray-800 hover:bg-red-900/50 text-gray-300 rounded text-xs">删除</button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {items.length === 0 && <p className="text-gray-500 text-sm">暂无 API 密钥。请先添加供应商。</p>}
       </div>
     </div>

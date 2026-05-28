@@ -65,6 +65,11 @@ const LABELS: Record<string, string> = {
   most_quota_left: "剩余额度最多",
   balanced: "均衡",
   fallback_chain: "回退链",
+  official: "官方",
+  reseller: "经销商",
+  proxy: "中转站",
+  shared_account: "共享账号",
+  other: "其他",
 };
 
 export function labelFor(value: string | null | undefined): string {
@@ -75,4 +80,16 @@ export function labelFor(value: string | null | undefined): string {
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   return new Date(value).toLocaleString("zh-CN");
+}
+
+export function formatDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("zh-CN");
+}
+
+export function daysUntil(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null;
+  const target = new Date(dateStr);
+  const now = new Date();
+  return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
