@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuth } from "@/lib/api-handler";
 import {
   getCostSummary,
   getCostByProvider,
@@ -13,11 +13,7 @@ import {
 } from "@/lib/analytics/cost-aggregator";
 import { getCachedData, setCachedData, generateCacheKey, CACHE_TTL } from "@/lib/cache";
 
-export async function GET(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const GET = withAuth(async ({ user, supabase }, request) => {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "summary";
   const period = (searchParams.get("period") || "monthly") as "daily" | "weekly" | "monthly" | "yearly";
@@ -71,4 +67,4 @@ export async function GET(request: Request) {
     console.error("Analytics error:", err);
     return NextResponse.json({ error: "Failed to fetch analytics" }, { status: 500 });
   }
-}
+});

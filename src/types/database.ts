@@ -237,6 +237,7 @@ export interface UsageLog {
   model_id: string;
   model_endpoint_id: string;
   provider_id: string;
+  gateway_token_id: string | null;
   request_type: string;
   input_tokens: number | null;
   output_tokens: number | null;

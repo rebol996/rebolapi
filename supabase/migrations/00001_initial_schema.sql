@@ -133,7 +133,7 @@ CREATE TABLE model_endpoints (
   last_success_at TIMESTAMPTZ,
   last_error_at TIMESTAMPTZ,
   last_error_message TEXT,
-  health_score NUMERIC(3, 2) NOT NULL DEFAULT 100.00,
+  health_score NUMERIC(5, 2) NOT NULL DEFAULT 100.00,
   discovered_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ,
   disabled_at TIMESTAMPTZ,

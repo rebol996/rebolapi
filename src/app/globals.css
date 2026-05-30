@@ -3,6 +3,40 @@
 :root {
   --background: #030712;
   --foreground: #f3f4f6;
+
+  /* Surface colors (panels, cards, sidebar) */
+  --surface-primary: #111827;    /* bg-gray-900 */
+  --surface-secondary: #1f2937;  /* bg-gray-800 */
+  --surface-border: #1f2937;     /* border-gray-800 */
+  --surface-border-light: #374151; /* border-gray-700 */
+
+  /* Text hierarchy */
+  --text-primary: #ffffff;
+  --text-secondary: #d1d5db;     /* text-gray-300 */
+  --text-tertiary: #9ca3af;      /* text-gray-400 */
+  --text-muted: #6b7280;         /* text-gray-500 */
+
+  /* Accent / interactive */
+  --accent: #2563eb;             /* blue-600 */
+  --accent-hover: #1d4ed8;       /* blue-700 */
+  --accent-active: #1e40af;      /* blue-800 */
+
+  /* Semantic — status */
+  --status-success: #15803d;
+  --status-warning: #b45309;
+  --status-error: #b91c1c;
+  --status-info: #1d4ed8;
+
+  /* Semantic — alert backgrounds */
+  --alert-critical-bg: rgba(127, 29, 29, 0.3);
+  --alert-critical-border: #991b1b;
+  --alert-critical-text: #fca5a5;
+  --alert-warning-bg: rgba(113, 63, 18, 0.3);
+  --alert-warning-border: #92400e;
+  --alert-warning-text: #fde68a;
+  --alert-info-bg: rgba(30, 64, 175, 0.5);
+  --alert-info-border: #1e3a8a;
+  --alert-info-text: #93c5fd;
 }
 
 @theme inline {
@@ -15,7 +49,6 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
 
 ::-webkit-scrollbar {
@@ -24,10 +57,10 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #111827;
+  background: var(--surface-primary);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: var(--surface-border-light);
   border-radius: 3px;
 }

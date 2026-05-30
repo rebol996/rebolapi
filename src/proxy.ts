@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { addSecurityHeaders } from "@/lib/security/headers";
 
 const PUBLIC_PAGES = ["/auth/login", "/auth/callback"];
-const PUBLIC_API_PATHS = ["/api/health", "/api/gateway/chat"];
+const PUBLIC_API_PATHS = ["/api/health", "/api/gateway/chat", "/api/v1/models", "/api/v1/chat/completions", "/api/v1/messages"];
 
 function isPublicPath(path: string): boolean {
   if (PUBLIC_PAGES.includes(path)) return true;
@@ -14,14 +15,14 @@ function isApiPath(path: string): boolean {
   return path.startsWith("/api/");
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   let supabaseResponse = NextResponse.next({ request });
   supabaseResponse = applyCorsHeaders(request, supabaseResponse);
 
   if (request.method === "OPTIONS" && isApiPath(path)) {
-    return applyCorsHeaders(request, new NextResponse(null, { status: 204 }));
+    return applyCorsHeaders(request, addSecurityHeaders(new NextResponse(null, { status: 204 })));
   }
 
   const supabase = createServerClient(
@@ -53,7 +54,7 @@ export async function middleware(request: NextRequest) {
 
   if (!user && !isPublicPath(path)) {
     if (isApiPath(path)) {
-      return applyCorsHeaders(request, NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
+      return addSecurityHeaders(applyCorsHeaders(request, NextResponse.json({ error: "Unauthorized" }, { status: 401 })));
     }
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
@@ -63,7 +64,7 @@ export async function middleware(request: NextRequest) {
   if (user && allowedEmail && user.email !== allowedEmail) {
     await supabase.auth.signOut();
     if (isApiPath(path)) {
-      return applyCorsHeaders(request, NextResponse.json({ error: "Forbidden" }, { status: 403 }));
+      return addSecurityHeaders(applyCorsHeaders(request, NextResponse.json({ error: "Forbidden" }, { status: 403 })));
     }
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
@@ -75,6 +76,11 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return applyCorsHeaders(request, NextResponse.redirect(url));
+  }
+
+  // Apply security headers to all API responses
+  if (isApiPath(path)) {
+    addSecurityHeaders(supabaseResponse);
   }
 
   return supabaseResponse;
@@ -91,13 +97,22 @@ function applyCorsHeaders(request: NextRequest, response: NextResponse): NextRes
     .map((item) => item.trim())
     .filter(Boolean);
 
-  if (origin && (allowedOrigins.length === 0 || allowedOrigins.includes(origin))) {
-    response.headers.set("Access-Control-Allow-Origin", origin);
-    response.headers.set("Vary", "Origin");
+  if (origin) {
+    const isDevelopment = process.env.NODE_ENV === "development";
+    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
+      // Production: only allow explicitly listed origins
+      response.headers.set("Access-Control-Allow-Origin", origin);
+      response.headers.set("Vary", "Origin");
+    } else if (allowedOrigins.length === 0 && isDevelopment) {
+      // Development with no configured origins: allow all
+      response.headers.set("Access-Control-Allow-Origin", origin);
+      response.headers.set("Vary", "Origin");
+    }
+    // If allowedOrigins is empty and not development: no CORS header set (secure by default)
   }
 
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key");
   response.headers.set("Access-Control-Max-Age", "86400");
 
   return response;

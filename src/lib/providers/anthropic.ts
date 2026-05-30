@@ -1,4 +1,5 @@
 import type { ProviderAdapter, ChatRequest, ChatResponse, StreamChunk, DiscoveryResult, AdapterError, DiscoveryModel } from "./types";
+import { createTimeoutSignal } from "./utils";
 
 export class AnthropicAdapter implements ProviderAdapter {
   async discoverModels(apiKey: string, baseUrl: string): Promise<DiscoveryResult> {
@@ -8,6 +9,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
+      signal: createTimeoutSignal(),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -46,6 +48,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: createTimeoutSignal(),
     });
     const latency_ms = Date.now() - start;
     if (!res.ok) {
@@ -88,6 +91,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: createTimeoutSignal(),
     });
 
     if (!res.ok) {

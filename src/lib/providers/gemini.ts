@@ -1,10 +1,19 @@
 import type { ProviderAdapter, ChatRequest, ChatResponse, StreamChunk, DiscoveryResult, AdapterError, DiscoveryModel } from "./types";
+import { createTimeoutSignal } from "./utils";
+
+const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 
 export class GeminiAdapter implements ProviderAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async discoverModels(apiKey: string, _baseUrl: string): Promise<DiscoveryResult> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    const res = await fetch(url);
+  private getBaseUrl(baseUrl: string): string {
+    return baseUrl?.trim() || GEMINI_DEFAULT_BASE_URL;
+  }
+
+  async discoverModels(apiKey: string, baseUrl: string): Promise<DiscoveryResult> {
+    // SECURITY NOTE: Gemini API requires the key as a URL query parameter.
+    // This is by design per Google's API specification. The key is only sent over HTTPS.
+    const base = this.getBaseUrl(baseUrl);
+    const url = `${base}/v1beta/models?key=${apiKey}`;
+    const res = await fetch(url, { signal: createTimeoutSignal() });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw { type: "discovery_error", message: `HTTP ${res.status}: ${body}`, status: res.status, retryable: res.status >= 500 || res.status === 429 };
@@ -19,9 +28,10 @@ export class GeminiAdapter implements ProviderAdapter {
     return { models, raw: JSON.stringify(data).slice(0, 5000) };
   }
 
-  async chatCompletion(apiKey: string, _baseUrl: string, request: ChatRequest): Promise<ChatResponse> {
+  async chatCompletion(apiKey: string, baseUrl: string, request: ChatRequest): Promise<ChatResponse> {
     const modelId = request.model;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+    const base = this.getBaseUrl(baseUrl);
+    const url = `${base}/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
 
     const contents = this.buildContents(request);
     const systemInstruction = this.buildSystemInstruction(request);
@@ -40,6 +50,7 @@ export class GeminiAdapter implements ProviderAdapter {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: createTimeoutSignal(),
     });
     const latency_ms = Date.now() - start;
     if (!res.ok) {
@@ -60,9 +71,10 @@ export class GeminiAdapter implements ProviderAdapter {
     };
   }
 
-  async *chatCompletionStream(apiKey: string, _baseUrl: string, request: ChatRequest): AsyncGenerator<StreamChunk> {
+  async *chatCompletionStream(apiKey: string, baseUrl: string, request: ChatRequest): AsyncGenerator<StreamChunk> {
     const modelId = request.model;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const base = this.getBaseUrl(baseUrl);
+    const url = `${base}/v1beta/models/${modelId}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
     const contents = this.buildContents(request);
     const systemInstruction = this.buildSystemInstruction(request);
@@ -80,6 +92,7 @@ export class GeminiAdapter implements ProviderAdapter {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: createTimeoutSignal(),
     });
 
     if (!res.ok) {

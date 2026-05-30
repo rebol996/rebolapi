@@ -134,10 +134,12 @@ export async function recordBudgetUsage(
   supabase: SupabaseClient,
   userId: string,
   apiKeyId: string,
-  _cost: number,
-  _providerId?: string,
-  _modelId?: string
+  cost: number,
+  providerId?: string,
+  modelId?: string
 ): Promise<void> {
+  console.debug(`Recording budget usage: cost=${cost}, provider=${providerId}, model=${modelId}`);
+
   const alertsToCreate: Array<{
     user_id: string;
     type: string;
@@ -289,6 +291,8 @@ async function getBudgetUsageForScope(
     query = query.eq("model_id", budget.scope_id);
   } else if (budget.scope === "model_endpoint" && budget.scope_id) {
     query = query.eq("model_endpoint_id", budget.scope_id);
+  } else if (budget.scope === "task_type" && budget.scope_id) {
+    query = query.eq("request_type", budget.scope_id);
   }
 
   const { data } = await query;

@@ -58,3 +58,11 @@ export function warmJson(path: string) {
 export function invalidateJson(path: string) {
   cache.delete(path);
 }
+
+export function invalidateByPrefix(prefix: string) {
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+    }
+  }
+}

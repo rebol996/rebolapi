@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { UsageLogWithProvider, UsageLogWithModel, EndpointForHealth } from "@/lib/gateway/types";
 
 export interface CostSummary {
   total_cost: number;
@@ -164,7 +165,7 @@ export async function getCostByProvider(
   const providerMap = new Map<string, CostByProvider>();
 
   for (const log of data) {
-    const provider = log.providers as unknown as { id: string; name: string };
+    const provider = (log as unknown as UsageLogWithProvider).providers;
     if (!provider) continue;
 
     const existing = providerMap.get(provider.id) || {
@@ -215,7 +216,7 @@ export async function getCostByModel(
   const modelMap = new Map<string, CostByModel>();
 
   for (const log of data) {
-    const model = log.models as unknown as { id: string; display_name: string; providers: { name: string } | null };
+    const model = (log as unknown as UsageLogWithModel).models;
     if (!model) continue;
 
     const existing = modelMap.get(model.id) || {
@@ -408,7 +409,8 @@ export async function getEndpointHealthRanking(
   if (!data) return [];
 
   return data.map((ep) => {
-    const model = ep.models as unknown as { display_name: string; providers: { name: string } | null };
+    const typed = ep as unknown as EndpointForHealth;
+    const model = typed.models;
     const totalCalls = (ep.success_count || 0) + (ep.failure_count || 0);
     const successRate = totalCalls > 0 ? ((ep.success_count || 0) / totalCalls) * 100 : 100;
 
@@ -491,7 +493,7 @@ export async function getModelUsageRanking(
   const modelMap = new Map<string, ModelUsageRanking>();
 
   for (const log of data) {
-    const model = log.models as unknown as { id: string; display_name: string; quality_level: number | null; providers: { name: string } | null };
+    const model = (log as unknown as UsageLogWithModel).models;
     if (!model) continue;
 
     const existing = modelMap.get(model.id) || {
@@ -526,11 +528,12 @@ function getPeriodDates(period: "daily" | "weekly" | "monthly" | "yearly"): { st
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
       break;
     }
-    case "monthly":
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      break;
     case "yearly":
       startDate = new Date(now.getFullYear(), 0, 1);
+      break;
+    case "monthly":
+    default:
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
       break;
   }
 

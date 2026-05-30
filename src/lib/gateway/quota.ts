@@ -62,13 +62,13 @@ export async function updateQuotaUsage(
   endpointId: string,
   usageAmount: number
 ): Promise<QuotaUpdateResult> {
-  const { data: endpoint, error } = await supabase
-    .from("model_endpoints")
-    .select("quota_total, quota_used, low_quota_alert")
-    .eq("id", endpointId)
-    .single();
+  // Use atomic RPC to avoid race conditions in serverless
+  const { data, error } = await supabase.rpc("increment_quota_used", {
+    p_endpoint_id: endpointId,
+    p_amount: usageAmount,
+  });
 
-  if (error || !endpoint) {
+  if (error || !data || data.length === 0) {
     return {
       success: false,
       previous_used: 0,
@@ -79,22 +79,19 @@ export async function updateQuotaUsage(
     };
   }
 
-  const previousUsed = endpoint.quota_used || 0;
-  const newUsed = previousUsed + usageAmount;
-  const quotaTotal = endpoint.quota_total || 0;
-  const remaining = quotaTotal - newUsed;
+  const result = data[0];
+  const quotaTotal = result.quota_total || 0;
+  const newUsed = result.quota_used || 0;
+  const remaining = result.remaining || 0;
   const quotaPercentage = quotaTotal > 0 ? (newUsed / quotaTotal) * 100 : 0;
-  const isLow = endpoint.low_quota_alert ? remaining <= endpoint.low_quota_alert : quotaPercentage >= 80;
+  const isLow = result.low_quota_alert
+    ? remaining <= result.low_quota_alert
+    : quotaPercentage >= 80;
   const isExceeded = remaining <= 0;
-
-  await supabase
-    .from("model_endpoints")
-    .update({ quota_used: newUsed })
-    .eq("id", endpointId);
 
   return {
     success: true,
-    previous_used: previousUsed,
+    previous_used: newUsed - usageAmount,
     new_used: newUsed,
     remaining,
     is_low: isLow,
@@ -102,18 +99,20 @@ export async function updateQuotaUsage(
   };
 }
 
-export async function checkAndResetQuotas(supabase: SupabaseClient): Promise<number> {
+export async function checkAndResetQuotas(supabase: SupabaseClient, userId: string): Promise<number> {
   const now = new Date();
   const today = now.toISOString().split("T")[0];
-  let resetCount = 0;
 
   const { data: endpoints } = await supabase
     .from("model_endpoints")
     .select("id, reset_cycle, reset_date, quota_used")
+    .eq("user_id", userId)
     .not("reset_cycle", "is", null)
     .not("quota_total", "is", null);
 
   if (!endpoints) return 0;
+
+  const endpointIdsToReset: string[] = [];
 
   for (const endpoint of endpoints) {
     let shouldReset = false;
@@ -143,19 +142,22 @@ export async function checkAndResetQuotas(supabase: SupabaseClient): Promise<num
     }
 
     if (shouldReset && endpoint.quota_used && endpoint.quota_used > 0) {
-      await supabase
-        .from("model_endpoints")
-        .update({
-          quota_used: 0,
-          reset_date: today,
-        })
-        .eq("id", endpoint.id);
-
-      resetCount++;
+      endpointIdsToReset.push(endpoint.id);
     }
   }
 
-  return resetCount;
+  // Batch update all endpoints at once instead of one-by-one
+  if (endpointIdsToReset.length > 0) {
+    await supabase
+      .from("model_endpoints")
+      .update({
+        quota_used: 0,
+        reset_date: today,
+      })
+      .in("id", endpointIdsToReset);
+  }
+
+  return endpointIdsToReset.length;
 }
 
 export async function getLowQuotaEndpoints(

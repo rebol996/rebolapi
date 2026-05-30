@@ -1,3 +1,14 @@
+/**
+ * In-memory LRU cache.
+ *
+ * NOTE: In serverless environments (Vercel), this cache is per-instance
+ * and does NOT persist across function invocations. Each cold start gets
+ * a fresh empty cache. This is acceptable for this personal-use app where
+ * the cache provides marginal benefit during burst traffic to the same
+ * instance. Do NOT rely on this for correctness — only for performance
+ * optimization within a single invocation.
+ */
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;

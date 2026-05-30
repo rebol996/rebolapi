@@ -43,7 +43,7 @@ export function validateMessages(messages: unknown): ValidationResult {
 
 export function validateEndpointId(id: unknown): ValidationResult {
   if (!id) return { valid: true, errors: [] };
-  
+
   if (typeof id !== "string") {
     return { valid: false, errors: ["Endpoint ID must be a string"] };
   }
@@ -58,7 +58,7 @@ export function validateEndpointId(id: unknown): ValidationResult {
 
 export function validateStrategy(strategy: unknown): ValidationResult {
   if (!strategy) return { valid: true, errors: [] };
-  
+
   const validStrategies = ["manual", "best_quality", "lowest_cost", "fastest", "most_quota_left", "balanced", "fallback_chain"];
   if (typeof strategy !== "string" || !validStrategies.includes(strategy)) {
     return { valid: false, errors: ["Invalid strategy"] };
@@ -69,13 +69,14 @@ export function validateStrategy(strategy: unknown): ValidationResult {
 
 export function validateTaskType(taskType: unknown): ValidationResult {
   if (!taskType) return { valid: true, errors: [] };
-  
+
   const validTypes = [
     "chat", "analyze", "review", "plan", "refactor", "bug_diagnosis",
     "test_generation", "security_review", "performance_analysis",
-    "pr_description", "commit_message", "requirement_breakdown", "custom"
+    "pr_description", "commit_message", "requirement_breakdown",
+    "architecture_planning", "custom"
   ];
-  
+
   if (typeof taskType !== "string" || !validTypes.includes(taskType)) {
     return { valid: false, errors: ["Invalid task type"] };
   }
@@ -85,7 +86,7 @@ export function validateTaskType(taskType: unknown): ValidationResult {
 
 export function validateTemperature(temperature: unknown): ValidationResult {
   if (temperature === undefined || temperature === null) return { valid: true, errors: [] };
-  
+
   if (typeof temperature !== "number" || temperature < 0 || temperature > 2) {
     return { valid: false, errors: ["Temperature must be between 0 and 2"] };
   }
@@ -95,7 +96,7 @@ export function validateTemperature(temperature: unknown): ValidationResult {
 
 export function validateMaxTokens(maxTokens: unknown): ValidationResult {
   if (maxTokens === undefined || maxTokens === null) return { valid: true, errors: [] };
-  
+
   if (typeof maxTokens !== "number" || maxTokens < 1 || maxTokens > 1000000) {
     return { valid: false, errors: ["Max tokens must be between 1 and 1000000"] };
   }
@@ -103,36 +104,15 @@ export function validateMaxTokens(maxTokens: unknown): ValidationResult {
   return { valid: true, errors: [] };
 }
 
-const gatewayRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+/**
+ * Rate limiting is now enforced in gateway/auth.ts validateGatewayToken()
+ * which queries usage_logs for the token's recent call count.
+ */
 
-export function checkGatewayTokenRateLimit(tokenId: string, limit: number): boolean {
-  const now = Date.now();
-  const minuteKey = Math.floor(now / 60000);
-  const key = `${tokenId}:${minuteKey}`;
-  const state = gatewayRateLimitStore.get(key);
-
-  for (const [storeKey, value] of gatewayRateLimitStore.entries()) {
-    if (value.resetAt < now) {
-      gatewayRateLimitStore.delete(storeKey);
-    }
-  }
-
-  if (!state) {
-    gatewayRateLimitStore.set(key, { count: 1, resetAt: (minuteKey + 1) * 60000 });
-    return true;
-  }
-
-  if (state.count >= limit) {
-    return false;
-  }
-
-  state.count++;
-  return true;
-}
-
-export function sanitizeInput(input: string): string {
-  return input
-    .replace(/[<>]/g, "")
-    .trim()
-    .slice(0, 100000);
+/**
+ * Sanitize model name to prevent injection in Supabase filter strings.
+ * Only allows alphanumeric, dots, dashes, underscores, and forward slashes.
+ */
+export function sanitizeModelName(model: string): string {
+  return model.replace(/[^a-zA-Z0-9._\-\/]/g, "");
 }

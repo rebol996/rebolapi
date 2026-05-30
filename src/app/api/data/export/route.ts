@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { withAuth, parseJsonBody } from "@/lib/api-handler";
 
-export async function GET(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// Tables that contain sensitive fields that must be excluded from export
+const SENSITIVE_FIELDS: Record<string, string[]> = {
+  api_keys: ["encrypted_key"],
+  account_pool_items: ["encrypted_api_key"],
+  gateway_tokens: ["token_hash"],
+};
 
+// Allowed export/import types
+const VALID_TYPES = ["subscriptions", "usage_logs", "billing", "prompt_templates", "provider_config", "cost_report", "full"];
+
+export const GET = withAuth(async ({ user, supabase }, request) => {
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format") || "json";
   const type = searchParams.get("type") || "full";
@@ -25,6 +32,9 @@ export async function GET(request: Request) {
   };
 
   for (const table of tables) {
+    // Exclude sensitive fields from export
+    const sensitiveFields = SENSITIVE_FIELDS[table] || [];
+
     let query = supabase.from(table).select("*").eq("user_id", user.id);
 
     if (startDate && hasDateColumn(table)) {
@@ -35,16 +45,20 @@ export async function GET(request: Request) {
     }
 
     const { data, error } = await query;
-    if (!error) {
-      if (!includeMetadata && table !== "usage_logs") {
-        backup[table] = (data || []).map((row: Record<string, unknown>) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { user_id, created_at, updated_at, ...rest } = row;
-          return rest;
-        });
-      } else {
-        backup[table] = data;
-      }
+    if (!error && data) {
+      // Strip sensitive fields (encrypted keys, token hashes) from each row before export
+      backup[table] = data.map((row: Record<string, unknown>) => {
+        const cleaned = { ...row };
+        for (const field of sensitiveFields) {
+          delete cleaned[field];
+        }
+        if (!includeMetadata && table !== "usage_logs") {
+          delete cleaned.user_id;
+          delete cleaned.created_at;
+          delete cleaned.updated_at;
+        }
+        return cleaned;
+      });
     }
   }
 
@@ -68,34 +82,63 @@ export async function GET(request: Request) {
       "Content-Disposition": `attachment; filename="rebol-api-${type}-${Date.now()}.json"`,
     },
   });
-}
+});
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const body = await request.json();
-  const { type = "full", data: importData } = body;
+export const POST = withAuth(async ({ user, supabase }, request) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+  const { type = "full", data: importData } = parsed.body as { type?: string; data?: unknown };
 
   if (!importData || typeof importData !== "object") {
     return NextResponse.json({ error: "Invalid import data" }, { status: 400 });
   }
 
-  const results: Record<string, { imported: number; errors: number; skipped: number }> = {};
-  const tables = getTablesForType(type);
+  // Limit import payload size (5 MB serialized)
+  const payloadSize = JSON.stringify(importData).length;
+  if (payloadSize > 5 * 1024 * 1024) {
+    return NextResponse.json({ error: "Import data too large (max 5 MB)" }, { status: 413 });
+  }
+
+  // Validate type parameter
+  if (type !== "full" && !VALID_TYPES.includes(type)) {
+    return NextResponse.json({ error: `Invalid type. Allowed: ${VALID_TYPES.join(", ")}` }, { status: 400 });
+  }
+
+  // Tables that can be safely imported (excludes security-sensitive tables whose
+// creation flows involve hashing or encryption that raw import would bypass)
+const IMPORTABLE_TABLES = [
+  "providers",
+  "subscriptions",
+  "models",
+  "model_endpoints",
+  "prompt_templates",
+  "budgets",
+];
+
+const results: Record<string, { imported: number; errors: number; skipped: number }> = {};
+  const tables = getTablesForType(type).filter((t) => IMPORTABLE_TABLES.includes(t));
 
   for (const table of tables) {
-    const rows = importData[table];
+    const rows = (importData as Record<string, unknown>)[table];
     if (!Array.isArray(rows)) continue;
 
     let imported = 0;
     let errors = 0;
     let skipped = 0;
 
-    for (const row of rows) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { id, created_at, updated_at, user_id: rowUserId, ...rest } = row;
+    // Strip sensitive fields that should never be imported
+    const sensitiveFields = SENSITIVE_FIELDS[table] || [];
+
+    for (const rawRow of rows) {
+      const row = rawRow as Record<string, unknown>;
+
+      // Strip id, timestamps, and sensitive fields
+      const { id: _id, created_at: _ca, updated_at: _ua, user_id: _rowUserId, ...rest } = row;
+
+      // Remove sensitive fields
+      for (const field of sensitiveFields) {
+        delete rest[field];
+      }
 
       if (type !== "full" && !validateRow(table, rest)) {
         skipped++;
@@ -104,7 +147,7 @@ export async function POST(request: Request) {
 
       const { error } = await supabase
         .from(table)
-        .upsert({ ...rest, user_id: user.id }, { onConflict: "id" });
+        .insert({ ...rest, user_id: user.id });
       if (error) errors++;
       else imported++;
     }
@@ -113,7 +156,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ data: results });
-}
+});
 
 function getTablesForType(type: string): string[] {
   switch (type) {
@@ -321,10 +364,10 @@ function convertToCsv(data: Record<string, unknown>, type: string): string {
   const rows = data[type] || data[Object.keys(data).find((k) => k !== "export_date" && k !== "type" && k !== "filters" && k !== "cost_summary") || ""] || [];
   if (!Array.isArray(rows) || rows.length === 0) return "";
 
-  const headers = Object.keys(rows[0]).filter((k) => k !== "user_id");
+  const headers = Object.keys(rows[0] as Record<string, unknown>).filter((k) => k !== "user_id");
   const lines = [headers.join(",")];
 
-  for (const row of rows) {
+  for (const row of rows as Record<string, unknown>[]) {
     const values = headers.map((h) => {
       const val = row[h];
       if (val === null || val === undefined) return "";

@@ -1,48 +1,18 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
-import { hashToken } from "@/lib/token";
+import { validateGatewayToken } from "@/lib/gateway/auth";
 import { executeGatewayCall } from "@/lib/gateway";
-import { checkGatewayTokenRateLimit, validateEndpointId, validateMaxTokens, validateMessages, validateStrategy, validateTaskType, validateTemperature } from "@/lib/security/validation";
+import { validateEndpointId, validateMaxTokens, validateMessages, validateStrategy, validateTaskType, validateTemperature } from "@/lib/security/validation";
 import type { ChatMessage } from "@/lib/providers/types";
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer rba_")) {
-    return NextResponse.json({ error: "Invalid gateway token" }, { status: 401 });
+  const xApiKey = request.headers.get("x-api-key");
+
+  const auth = await validateGatewayToken(authHeader, xApiKey, "chat:write");
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
-
-  const token = authHeader.slice(7);
-  const tokenHash = hashToken(token);
-
-  const supabase = createServiceRoleClient();
-
-  const { data: gatewayToken } = await supabase
-    .from("gateway_tokens")
-    .select("id, user_id, scopes, status, rate_limit_per_minute")
-    .eq("token_hash", tokenHash)
-    .eq("status", "active")
-    .single();
-
-  if (!gatewayToken) {
-    return NextResponse.json({ error: "Invalid or revoked token" }, { status: 401 });
-  }
-
-  if (gatewayToken.rate_limit_per_minute) {
-    const allowed = checkGatewayTokenRateLimit(gatewayToken.id, gatewayToken.rate_limit_per_minute);
-    if (!allowed) {
-      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
-    }
-  }
-
-  const scopes = gatewayToken.scopes as string[];
-  if (!scopes.some((s) => s.startsWith("chat"))) {
-    return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
-  }
-
-  await supabase
-    .from("gateway_tokens")
-    .update({ last_used_at: new Date().toISOString() })
-    .eq("id", gatewayToken.id);
 
   let body: {
     messages?: ChatMessage[];
@@ -51,6 +21,7 @@ export async function POST(request: Request) {
     task_type?: string;
     temperature?: number;
     max_tokens?: number;
+    scan_sensitive?: boolean;
   };
 
   try {
@@ -59,13 +30,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { messages, model_endpoint_id, strategy = "balanced", task_type = "chat", temperature, max_tokens }: {
+  const { messages, model_endpoint_id, strategy = "balanced", task_type = "chat", temperature, max_tokens, scan_sensitive: userScanSensitive }: {
     messages?: ChatMessage[];
     model_endpoint_id?: string;
     strategy?: string;
     task_type?: string;
     temperature?: number;
     max_tokens?: number;
+    scan_sensitive?: boolean;
   } = body;
 
   const validationErrors: string[] = [];
@@ -94,18 +66,21 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const userId = gatewayToken.user_id as string;
-
-  const result = await executeGatewayCall(supabase, userId, {
-    messages: messages!,
-    model_endpoint_id,
-    strategy,
-    task_type,
-    temperature,
-    max_tokens,
-    scan_sensitive: false,
-    save_policy: "metadata_only",
-  });
+  const result = await executeGatewayCall(
+    createServiceRoleClient(),
+    auth.userId,
+    {
+      messages: messages!,
+      model_endpoint_id,
+      strategy,
+      task_type,
+      temperature,
+      max_tokens,
+      scan_sensitive: userScanSensitive ?? false,
+      save_policy: "metadata_only",
+      gateway_token_id: auth.tokenId,
+    }
+  );
 
   if (!result.success) {
     const statusCode = result.validation_errors?.some((e) => e.code === "BUDGET_EXCEEDED") ? 402

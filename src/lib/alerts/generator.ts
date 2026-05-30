@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { EndpointWithModel, EndpointForAlerts, EndpointHealthAlert } from "@/lib/gateway/types";
 
 export interface AlertRule {
   type: string;
@@ -103,7 +104,8 @@ async function checkLowQuotas(supabase: SupabaseClient, userId: string): Promise
         const percentage = (remaining / ep.quota_total) * 100;
 
         if (percentage < 20) {
-          const modelName = (ep.models as unknown as { display_name: string })?.display_name || ep.provider_model_id;
+          const typed = ep as unknown as EndpointWithModel;
+          const modelName = typed.models?.display_name || ep.provider_model_id;
           alerts.push({
             type: "low_quota",
             severity: percentage < 10 ? "critical" : "warning",
@@ -242,7 +244,8 @@ async function checkApiKeyFailures(supabase: SupabaseClient, userId: string): Pr
 
   if (endpoints) {
     for (const ep of endpoints) {
-      const keyAlias = (ep.api_keys as unknown as { key_alias: string })?.key_alias || "Unknown";
+      const typed = ep as unknown as EndpointForAlerts;
+      const keyAlias = typed.api_keys?.key_alias || "Unknown";
       alerts.push({
         type: "api_key_failure",
         severity: ep.consecutive_failures >= 5 ? "critical" : "warning",
@@ -269,7 +272,8 @@ async function checkEndpointHealth(supabase: SupabaseClient, userId: string): Pr
 
   if (endpoints) {
     for (const ep of endpoints) {
-      const modelName = (ep.models as unknown as { display_name: string })?.display_name || ep.provider_model_id;
+      const typed = ep as unknown as EndpointHealthAlert;
+      const modelName = typed.models?.display_name || ep.provider_model_id;
       alerts.push({
         type: "endpoint_health_low",
         severity: ep.health_score < 25 ? "critical" : "warning",
@@ -294,27 +298,30 @@ async function checkUnusedSubscriptions(supabase: SupabaseClient, userId: string
     .eq("user_id", userId)
     .eq("status", "active");
 
-  if (subscriptions) {
-    for (const sub of subscriptions) {
-      const { data: recentUsage } = await supabase
-        .from("usage_logs")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("subscription_id", sub.id)
-        .gte("created_at", thirtyDaysAgo)
-        .limit(1);
+  if (!subscriptions || subscriptions.length === 0) return alerts;
 
-      if (!recentUsage || recentUsage.length === 0) {
-        const name = sub.alias || sub.platform;
-        alerts.push({
-          type: "unused_subscription",
-          severity: "info",
-          title: `Unused Subscription: ${name}`,
-          message: `${sub.platform} - ${sub.plan_name} has not been used in 30 days${sub.price ? ` ($${sub.price}/month)` : ""}`,
-          entity_type: "subscription",
-          entity_id: sub.id,
-        });
-      }
+  // Batch query: get all subscription_ids that have recent usage
+  const subIds = subscriptions.map((s) => s.id);
+  const { data: recentUsage } = await supabase
+    .from("usage_logs")
+    .select("subscription_id")
+    .eq("user_id", userId)
+    .in("subscription_id", subIds)
+    .gte("created_at", thirtyDaysAgo);
+
+  const usedSubIds = new Set((recentUsage || []).map((r) => r.subscription_id));
+
+  for (const sub of subscriptions) {
+    if (!usedSubIds.has(sub.id)) {
+      const name = sub.alias || sub.platform;
+      alerts.push({
+        type: "unused_subscription",
+        severity: "info",
+        title: `Unused Subscription: ${name}`,
+        message: `${sub.platform} - ${sub.plan_name} has not been used in 30 days${sub.price ? ` ($${sub.price}/month)` : ""}`,
+        entity_type: "subscription",
+        entity_id: sub.id,
+      });
     }
   }
 
@@ -382,14 +389,16 @@ async function getMonthlyUsage(supabase: SupabaseClient, apiKeyId: string): Prom
 }
 
 export async function generateAlerts(supabase: SupabaseClient, userId: string): Promise<AlertData[]> {
-  const allAlerts: AlertData[] = [];
+  const results = await Promise.allSettled(
+    ALERT_RULES.map((rule) => rule.check(supabase, userId))
+  );
 
-  for (const rule of ALERT_RULES) {
-    try {
-      const alerts = await rule.check(supabase, userId);
-      allAlerts.push(...alerts);
-    } catch (err) {
-      console.error(`Error checking alert rule ${rule.type}:`, err);
+  const allAlerts: AlertData[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      allAlerts.push(...result.value);
+    } else {
+      console.error("Error checking alert rule:", result.reason);
     }
   }
 

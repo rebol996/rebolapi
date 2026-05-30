@@ -1,10 +1,12 @@
 import type { ProviderAdapter, ChatRequest, ChatResponse, StreamChunk, DiscoveryResult, AdapterError, DiscoveryModel } from "./types";
+import { createTimeoutSignal } from "./utils";
 
 export class OpenAICompatibleAdapter implements ProviderAdapter {
   async discoverModels(apiKey: string, baseUrl: string): Promise<DiscoveryResult> {
     const url = `${baseUrl}/v1/models`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: createTimeoutSignal(),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -30,6 +32,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...request, stream: false }),
+      signal: createTimeoutSignal(),
     });
     const latency_ms = Date.now() - start;
     if (!res.ok) {
@@ -59,6 +62,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...request, stream: true }),
+      signal: createTimeoutSignal(),
     });
 
     if (!res.ok) {

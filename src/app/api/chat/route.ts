@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuth, parseJsonBody } from "@/lib/api-handler";
 import { scanForSensitiveInfo, redactSensitiveInfo } from "@/lib/sensitive-scanner";
 import { executeGatewayCall } from "@/lib/gateway";
 import { validateMessages, validateEndpointId, validateStrategy, validateTaskType, validateTemperature, validateMaxTokens } from "@/lib/security/validation";
@@ -17,17 +17,10 @@ interface ChatRequestBody {
   save_policy?: string;
 }
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  let body: ChatRequestBody;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+export const POST = withAuth(async ({ user, supabase }, request) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.body as unknown as ChatRequestBody;
 
   const {
     messages,
@@ -71,23 +64,28 @@ export async function POST(request: Request) {
   let processedMessages = messages;
 
   if (scan_sensitive) {
-    const fullText = messages.map((m) => m.content).join(" ");
-    const scanResult = scanForSensitiveInfo(fullText);
-    
-    if (scanResult.found) {
+    // Scan each message individually to avoid offset issues with duplicate content
+    let hasSensitive = false;
+    const perMessageScans = messages.map((m) => {
+      const result = scanForSensitiveInfo(m.content);
+      if (result.found) hasSensitive = true;
+      return result;
+    });
+
+    if (hasSensitive) {
       if (sensitive_action === "cancel") {
+        const allPatterns = perMessageScans.flatMap((s) => s.patterns);
         return NextResponse.json({
           error: "Sensitive information detected",
-          sensitive_scan: scanResult.patterns.map((p) => ({ type: p.type, position: p.start })),
+          sensitive_scan: allPatterns.map((p) => ({ type: p.type, position: p.start })),
           action_required: true,
         }, { status: 400 });
       } else if (sensitive_action === "redact") {
-        processedMessages = messages.map((m) => ({
+        processedMessages = messages.map((m, i) => ({
           ...m,
-          content: redactSensitiveInfo(m.content, scanResult.patterns.filter((p) => {
-            const msgStart = fullText.indexOf(m.content);
-            return p.start >= msgStart && p.start < msgStart + m.content.length;
-          })),
+          content: perMessageScans[i].found
+            ? redactSensitiveInfo(m.content, perMessageScans[i].patterns)
+            : m.content,
         }));
       }
     }
@@ -125,4 +123,4 @@ export async function POST(request: Request) {
     fallback_attempts: result.fallback_attempts,
     task_run_id: result.task_run_id,
   });
-}
+});

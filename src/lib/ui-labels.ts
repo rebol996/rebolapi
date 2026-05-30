@@ -76,6 +76,8 @@ const LABELS: Record<string, string> = {
   sync_failed: "同步失败",
   syncing: "同步中",
   bearer_token: "Bearer Token",
+  asset: "资产",
+  consumption: "消耗",
 };
 
 export function labelFor(value: string | null | undefined): string {

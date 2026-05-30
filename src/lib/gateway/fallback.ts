@@ -1,3 +1,4 @@
+import type { ProviderType } from "@/types/database";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatRequest, ChatResponse, AdapterError } from "@/lib/providers/types";
 import { getAdapter } from "@/lib/providers";
@@ -30,6 +31,10 @@ export interface EndpointWithDetails {
   health_score: number;
   avg_latency_ms: number | null;
   consecutive_failures: number;
+  allowed_tasks: string[] | null;
+  blocked_tasks: string[] | null;
+  quota_total: number | null;
+  quota_used: number | null;
   api_keys: {
     id: string;
     encrypted_key: string;
@@ -100,7 +105,7 @@ export class FallbackRouter {
       };
     }
 
-    for (let i = 0; i < endpoints.length && i < this.config.maxRetries; i++) {
+    for (let i = 0; i < endpoints.length && i <= this.config.maxRetries; i++) {
       const endpoint = endpoints[i];
       const attemptStart = Date.now();
       
@@ -126,7 +131,7 @@ export class FallbackRouter {
           total_latency_ms: Date.now() - startTime,
         };
       } catch (err: unknown) {
-        const adapter = getAdapter(endpoint.api_keys.providers.provider_type as "openai_compatible" | "anthropic" | "gemini" | "custom");
+        const adapter = getAdapter(endpoint.api_keys.providers.provider_type as ProviderType);
         const adapterError = adapter.parseError(err);
 
         attempts.push({
@@ -144,10 +149,12 @@ export class FallbackRouter {
         });
 
         if (!this.isRetryable(adapterError)) {
-          break;
+          // Non-retryable on *this* endpoint (e.g. 401, 403, 404) — but
+          // other endpoints may still succeed, so continue the chain.
+          continue;
         }
 
-        if (i < endpoints.length - 1 && i < this.config.maxRetries - 1) {
+        if (i < endpoints.length - 1 && i < this.config.maxRetries) {
           const delay = this.calculateDelay(i);
           await this.sleep(delay);
         }
@@ -161,7 +168,11 @@ export class FallbackRouter {
     };
   }
 
-  private async getFallbackChain(
+  /**
+   * Get the ordered fallback chain for external callers (e.g. streaming).
+   * Public so the stream route can reuse the same endpoint resolution logic.
+   */
+  async getFallbackChain(
     userId: string,
     taskType: string,
     strategy: string,
@@ -180,6 +191,10 @@ export class FallbackRouter {
         health_score,
         avg_latency_ms,
         consecutive_failures,
+        allowed_tasks,
+        blocked_tasks,
+        quota_total,
+        quota_used,
         api_keys!inner (
           id,
           encrypted_key,
@@ -209,58 +224,58 @@ export class FallbackRouter {
       return [];
     }
 
-    let filtered = endpoints.filter((ep: Record<string, unknown>) => {
-      const allowed = ep.allowed_tasks as string[] | null;
-      const blocked = ep.blocked_tasks as string[] | null;
+    let filtered = (endpoints as unknown as EndpointWithDetails[]).filter((ep) => {
+      const allowed = ep.allowed_tasks;
+      const blocked = ep.blocked_tasks;
       if (blocked && blocked.includes(taskType)) return false;
       if (allowed && allowed.length > 0 && !allowed.includes(taskType)) return false;
       return true;
     });
 
     if (preferredEndpointId) {
-      const preferred = filtered.find((ep: Record<string, unknown>) => ep.id === preferredEndpointId);
+      const preferred = filtered.find((ep) => ep.id === preferredEndpointId);
       if (preferred) {
-        filtered = [preferred, ...filtered.filter((ep: Record<string, unknown>) => ep.id !== preferredEndpointId)];
+        filtered = [preferred, ...filtered.filter((ep) => ep.id !== preferredEndpointId)];
       }
     }
 
     this.sortEndpoints(filtered, strategy);
 
-    return filtered as unknown as EndpointWithDetails[];
+    return filtered;
   }
 
-  private sortEndpoints(endpoints: Record<string, unknown>[], strategy: string): void {
+  private sortEndpoints(endpoints: EndpointWithDetails[], strategy: string): void {
     switch (strategy) {
       case "best_quality":
-        endpoints.sort((a, b) => ((b.health_score as number) || 0) - ((a.health_score as number) || 0));
+        endpoints.sort((a, b) => (b.health_score || 0) - (a.health_score || 0));
         break;
-      case "lowest_cost": {
-        const getPrice = (ep: Record<string, unknown>) => {
-          const models = ep.models as { input_price: number | null; output_price: number | null };
-          return (models?.input_price || 0) + (models?.output_price || 0);
-        };
-        endpoints.sort((a, b) => getPrice(a) - getPrice(b));
+      case "lowest_cost":
+        endpoints.sort((a, b) => {
+          const priceA = (a.models.input_price || 0) + (a.models.output_price || 0);
+          const priceB = (b.models.input_price || 0) + (b.models.output_price || 0);
+          return priceA - priceB;
+        });
         break;
-      }
       case "fastest":
-        endpoints.sort((a, b) => ((a.avg_latency_ms as number) || 99999) - ((b.avg_latency_ms as number) || 99999));
+        endpoints.sort((a, b) => (a.avg_latency_ms || 99999) - (b.avg_latency_ms || 99999));
         break;
       case "most_quota_left":
         endpoints.sort((a, b) => {
-          const aLeft = ((a.quota_total as number) || 0) - ((a.quota_used as number) || 0);
-          const bLeft = ((b.quota_total as number) || 0) - ((b.quota_used as number) || 0);
+          const aLeft = (a.quota_total || 0) - (a.quota_used || 0);
+          const bLeft = (b.quota_total || 0) - (b.quota_used || 0);
           return bLeft - aLeft;
         });
         break;
       case "balanced":
         endpoints.sort((a, b) => {
-          const scoreA = ((a.health_score as number) || 0) * 0.4 + ((a.priority as number) || 0) * 0.3 + (100 - (((a.avg_latency_ms as number) || 100) / 100)) * 0.3;
-          const scoreB = ((b.health_score as number) || 0) * 0.4 + ((b.priority as number) || 0) * 0.3 + (100 - (((b.avg_latency_ms as number) || 100) / 100)) * 0.3;
+          const scoreA = (a.health_score || 0) * 0.4 + (a.priority || 0) * 0.3 + (100 - ((a.avg_latency_ms || 100) / 100)) * 0.3;
+          const scoreB = (b.health_score || 0) * 0.4 + (b.priority || 0) * 0.3 + (100 - ((b.avg_latency_ms || 100) / 100)) * 0.3;
           return scoreB - scoreA;
         });
         break;
+      case "fallback_chain":
       default:
-        endpoints.sort((a, b) => ((b.priority as number) || 0) - ((a.priority as number) || 0));
+        endpoints.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
   }
 
@@ -278,7 +293,7 @@ export class FallbackRouter {
       throw new Error("Failed to decrypt API key");
     }
 
-    const adapter = getAdapter(provider.provider_type as "openai_compatible" | "anthropic" | "gemini" | "custom");
+    const adapter = getAdapter(provider.provider_type as ProviderType);
     const baseUrl = apiKey.base_url || provider.base_url;
 
     return adapter.chatCompletion(plaintextKey, baseUrl, {
@@ -312,8 +327,9 @@ export async function recordFallbackAttempts(
   attempts: FallbackAttempt[],
   finalEndpointId: string | undefined
 ): Promise<void> {
-  for (const attempt of attempts) {
-    await supabase.from("usage_logs").insert({
+  // Batch insert all usage log entries in one call
+  if (attempts.length > 0) {
+    const rows = attempts.map((attempt) => ({
       user_id: userId,
       task_run_id: taskRunId,
       subscription_id: null,
@@ -328,7 +344,9 @@ export async function recordFallbackAttempts(
       http_status: attempt.http_status,
       latency_ms: attempt.latency_ms,
       fallback_attempt: attempt.attempt_number,
-    });
+    }));
+
+    await supabase.from("usage_logs").insert(rows);
   }
 
   if (finalEndpointId) {
@@ -343,44 +361,14 @@ export async function updateEndpointHealthAfterFallback(
   supabase: SupabaseClient,
   attempts: FallbackAttempt[]
 ): Promise<void> {
-  for (const attempt of attempts) {
-    const { data: ep } = await supabase
-      .from("model_endpoints")
-      .select("success_count, failure_count, consecutive_failures, avg_latency_ms, health_score")
-      .eq("id", attempt.endpoint_id)
-      .single();
+  // Use the atomic RPC for each attempt to avoid SELECT+UPDATE roundtrips
+  const updates = attempts.map((attempt) =>
+    supabase.rpc("update_endpoint_health", {
+      p_endpoint_id: attempt.endpoint_id,
+      p_success: attempt.success,
+      p_latency_ms: attempt.latency_ms ?? null,
+    })
+  );
 
-    if (!ep) continue;
-
-    const successCount = (ep.success_count as number) + (attempt.success ? 1 : 0);
-    const failureCount = (ep.failure_count as number) + (attempt.success ? 0 : 1);
-    const consecutiveFailures = attempt.success ? 0 : (ep.consecutive_failures as number) + 1;
-    const totalCalls = successCount + failureCount;
-    const healthScore = totalCalls > 0 ? Math.round((successCount / totalCalls) * 100 * 100) / 100 : 100;
-    const avgLatencyMs = attempt.latency_ms
-      ? Math.round(((ep.avg_latency_ms as number || attempt.latency_ms) * (totalCalls - 1) + attempt.latency_ms) / totalCalls)
-      : ep.avg_latency_ms;
-
-    const update: Record<string, unknown> = {
-      success_count: successCount,
-      failure_count: failureCount,
-      consecutive_failures: consecutiveFailures,
-      health_score: healthScore,
-      avg_latency_ms: avgLatencyMs,
-    };
-
-    if (attempt.success) {
-      update.last_success_at = new Date().toISOString();
-    } else {
-      update.last_error_at = new Date().toISOString();
-      update.last_error_message = attempt.error_message;
-    }
-
-    if (consecutiveFailures >= 5) {
-      update.enabled = false;
-      update.disabled_at = new Date().toISOString();
-    }
-
-    await supabase.from("model_endpoints").update(update).eq("id", attempt.endpoint_id);
-  }
+  await Promise.allSettled(updates);
 }

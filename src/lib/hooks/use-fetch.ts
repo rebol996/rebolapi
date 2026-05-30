@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { invalidateJson } from "@/lib/client/api-cache";
 
 interface UseFetchOptions<T> {
   initialData?: T;
@@ -26,6 +27,14 @@ export function useFetch<T>(
   const [loading, setLoading] = useState(immediate);
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+
+  // Keep refs in sync without triggering re-creation of fetchData
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+    onErrorRef.current = onError;
+  });
 
   const fetchData = useCallback(async () => {
     if (!url) return;
@@ -42,20 +51,20 @@ export function useFetch<T>(
 
       if (mountedRef.current) {
         setData(json.data);
-        onSuccess?.(json.data);
+        onSuccessRef.current?.(json.data);
       }
     } catch (err) {
       if (mountedRef.current) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
-        onError?.(error);
+        onErrorRef.current?.(error);
       }
     } finally {
       if (mountedRef.current) {
         setLoading(false);
       }
     }
-  }, [url, onSuccess, onError]);
+  }, [url]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -80,6 +89,7 @@ export function useFetch<T>(
 interface UseMutationOptions<T, V> {
   onSuccess?: (data: T, variables: V) => void;
   onError?: (error: Error, variables: V) => void;
+  invalidatePaths?: string[];
 }
 
 interface UseMutationResult<T, V> {
@@ -94,10 +104,17 @@ export function useMutation<T, V = Record<string, unknown>>(
   method: "POST" | "PUT" | "DELETE" | "PATCH" = "POST",
   options: UseMutationOptions<T, V> = {}
 ): UseMutationResult<T, V> {
-  const { onSuccess, onError } = options;
+  const { onSuccess, onError, invalidatePaths } = options;
   const [data, setData] = useState<T | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+    onErrorRef.current = onError;
+  });
 
   const mutate = useCallback(async (variables: V): Promise<T | undefined> => {
     setLoading(true);
@@ -116,17 +133,25 @@ export function useMutation<T, V = Record<string, unknown>>(
 
       const json = await response.json();
       setData(json.data);
-      onSuccess?.(json.data, variables);
+
+      // Invalidate related caches on success
+      if (invalidatePaths) {
+        for (const path of invalidatePaths) {
+          invalidateJson(path);
+        }
+      }
+
+      onSuccessRef.current?.(json.data, variables);
       return json.data;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       setError(error);
-      onError?.(error, variables);
+      onErrorRef.current?.(error, variables);
       return undefined;
     } finally {
       setLoading(false);
     }
-  }, [url, method, onSuccess, onError]);
+  }, [url, method, invalidatePaths]);
 
   return { data, loading, error, mutate };
 }

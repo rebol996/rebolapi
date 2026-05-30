@@ -8,6 +8,8 @@ It is designed for one primary user and provides cloud-synced management for AI 
 
 The product is not a traditional account pool or phone number pool. Its core purpose is to manage and route AI model access across multiple providers and subscriptions.
 
+Note: The system includes an Account Pool feature for convenience. This is a personal key management tool that allows bulk importing and syncing of API keys from various providers. It does NOT pool or share accounts between users. Each account is owned by and isolated to the single configured owner.
+
 Core product definition:
 
 ```text

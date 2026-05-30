@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "@/app/globals.css";
 import NavSidebar from "@/components/nav-sidebar";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +28,9 @@ export default function DashboardLayout({
     <div className={`${geistSans.variable} ${geistMono.variable} flex min-h-screen`}>
       <NavSidebar />
       <main className="flex-1 overflow-y-auto min-w-0">
-        <div className="pt-12 lg:pt-0 p-4 lg:p-6 max-w-7xl mx-auto">{children}</div>
+        <ErrorBoundary>
+          <div className="pt-12 lg:pt-0 p-4 lg:p-6 max-w-7xl mx-auto">{children}</div>
+        </ErrorBoundary>
       </main>
     </div>
   );

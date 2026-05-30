@@ -1,12 +1,19 @@
 import { OpenAICompatibleAdapter } from "./openai-compatible";
-import type { DiscoveryResult } from "./types";
+import type { DiscoveryResult, ChatRequest, ChatResponse, StreamChunk } from "./types";
+import { createTimeoutSignal } from "./utils";
+
+const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai";
 
 export class OpenRouterAdapter extends OpenAICompatibleAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async discoverModels(apiKey: string, _baseUrl: string): Promise<DiscoveryResult> {
-    const url = "https://openrouter.ai/api/v1/models";
+  private getBaseUrl(baseUrl: string): string {
+    return baseUrl?.trim() || OPENROUTER_DEFAULT_BASE_URL;
+  }
+
+  async discoverModels(apiKey: string, baseUrl: string): Promise<DiscoveryResult> {
+    const url = `${this.getBaseUrl(baseUrl)}/api/v1/models`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: createTimeoutSignal(),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -20,5 +27,13 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
       context_length: m.context_length as number | undefined,
     }));
     return { models, raw: JSON.stringify(data).slice(0, 5000) };
+  }
+
+  async chatCompletion(apiKey: string, baseUrl: string, request: ChatRequest): Promise<ChatResponse> {
+    return super.chatCompletion(apiKey, this.getBaseUrl(baseUrl), request);
+  }
+
+  async *chatCompletionStream(apiKey: string, baseUrl: string, request: ChatRequest): AsyncGenerator<StreamChunk> {
+    yield* super.chatCompletionStream!(apiKey, this.getBaseUrl(baseUrl), request);
   }
 }

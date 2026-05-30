@@ -178,7 +178,7 @@ export async function syncAccount(
   }
 
   // 7. Discover models
-  const adapter = getAdapter(providerType);
+  const adapter = getAdapter(providerType as ProviderType);
   let discoveryResult;
   try {
     discoveryResult = await adapter.discoverModels(plaintextKey, account.base_url);
@@ -332,7 +332,7 @@ export async function syncAccount(
   });
 
   // 11. Update account status
-  const finalStatus = result.endpoint_errors.length > 0 ? "active" : "active";
+  const finalStatus = "active";
   await supabase
     .from("account_pool_items")
     .update({

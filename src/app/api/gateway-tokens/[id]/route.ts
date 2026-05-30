@@ -1,34 +1,34 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuthParams, parseJsonBody, pickFields, handleDbError } from "@/lib/api-handler";
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const TOKEN_SELECT = "id, user_id, name, scopes, rate_limit_per_minute, status, last_used_at, created_at, revoked_at";
+const ALLOWED_UPDATE_FIELDS = ["name", "scopes", "rate_limit_per_minute", "status"];
 
-  const { id } = await params;
-  const body = await request.json();
-  const update: Record<string, unknown> = { ...body };
-  if (body.status === "revoked") update.revoked_at = new Date().toISOString();
+export const PUT = withAuthParams(async ({ user, supabase }, request, { id }) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+
+  const update = pickFields(parsed.body, ALLOWED_UPDATE_FIELDS);
+  // Handle revocation timestamp
+  if (parsed.body.status === "revoked") update.revoked_at = new Date().toISOString();
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("gateway_tokens")
     .update(update)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, user_id, name, scopes, rate_limit_per_minute, status, last_used_at, created_at, revoked_at")
+    .select(TOKEN_SELECT)
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { id } = await params;
+export const DELETE = withAuthParams(async ({ user, supabase }, _req, { id }) => {
   const { error } = await supabase.from("gateway_tokens").delete().eq("id", id).eq("user_id", user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ success: true });
-}
+});

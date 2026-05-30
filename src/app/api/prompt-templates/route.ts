@@ -1,34 +1,43 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuth, parseJsonBody, handleDbError } from "@/lib/api-handler";
 
-export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const TEMPLATE_SELECT = "id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at";
 
+export const GET = withAuth(async ({ user, supabase }) => {
   const { data, error } = await supabase
     .from("prompt_templates")
-    .select("id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at")
+    .select(TEMPLATE_SELECT)
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const POST = withAuth(async ({ user, supabase }, request) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.body;
 
-  const body = await request.json();
   const { data, error } = await supabase
     .from("prompt_templates")
-    .insert({ ...body, user_id: user.id })
-    .select("id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at")
+    .insert({
+      name: body.name as string,
+      task_type: (body.task_type as string) || "custom",
+      system_prompt: (body.system_prompt as string) || null,
+      user_prompt_template: body.user_prompt_template as string,
+      variables: body.variables as string[] | null || null,
+      default_strategy: (body.default_strategy as string) || "balanced",
+      default_temperature: (body.default_temperature as number) || null,
+      default_save_policy: (body.default_save_policy as string) || "metadata_only",
+      status: (body.status as string) || "active",
+      notes: (body.notes as string) || null,
+      user_id: user.id,
+    })
+    .select(TEMPLATE_SELECT)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data }, { status: 201 });
-}
+});

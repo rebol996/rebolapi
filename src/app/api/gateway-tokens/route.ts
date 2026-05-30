@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { generateToken, hashToken } from "@/lib/token";
+import { withAuth, handleDbError } from "@/lib/api-handler";
 
-export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const GET = withAuth(async ({ user, supabase }) => {
   const { data, error } = await supabase
     .from("gateway_tokens")
     .select("id, user_id, name, scopes, rate_limit_per_minute, status, last_used_at, created_at, revoked_at")
@@ -14,16 +10,12 @@ export async function GET() {
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const body = await request.json();
+export const POST = withAuth(async ({ user, supabase }, request) => {
+  const body = await request.json() as Record<string, unknown>;
   const { name, scopes, rate_limit_per_minute } = body;
 
   const plaintextToken = generateToken();
@@ -41,6 +33,6 @@ export async function POST(request: Request) {
     .select("id, name, scopes, rate_limit_per_minute, status, created_at")
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data: { ...data, token: plaintextToken } }, { status: 201 });
-}
+});

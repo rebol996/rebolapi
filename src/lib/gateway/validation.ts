@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { EndpointForValidation } from "./types";
 
 export interface ValidationResult {
   valid: boolean;
@@ -21,50 +22,6 @@ export interface ValidationWarning {
   field?: string;
   value?: unknown;
 }
-
-export interface EndpointValidationData {
-  id: string;
-  enabled: boolean;
-  is_available: boolean;
-  health_score: number;
-  quota_total: number | null;
-  quota_used: number | null;
-  quota_type: string;
-  allowed_tasks: string[] | null;
-  blocked_tasks: string[] | null;
-  consecutive_failures: number;
-  api_keys: {
-    id: string;
-    monthly_budget: number | null;
-    single_call_budget: number | null;
-    rate_limit_per_minute: number | null;
-    last_used_at: string | null;
-    subscription_id: string | null;
-  };
-  models: {
-    id: string;
-    input_price: number | null;
-    output_price: number | null;
-  };
-}
-
-export interface BudgetData {
-  id: string;
-  scope: string;
-  scope_id: string | null;
-  period: string;
-  amount: number;
-  currency: string;
-  warning_threshold: number | null;
-  hard_limit: boolean;
-}
-
-export interface RateLimitState {
-  count: number;
-  reset_at: number;
-}
-
-const rateLimitStore = new Map<string, RateLimitState>();
 
 export async function validateEndpoint(
   supabase: SupabaseClient,
@@ -115,7 +72,7 @@ export async function validateEndpoint(
     return { valid: false, errors, warnings };
   }
 
-  const ep = endpoint as unknown as EndpointValidationData;
+  const ep = endpoint as unknown as EndpointForValidation;
 
   if (!ep.enabled) {
     errors.push({
@@ -191,26 +148,17 @@ export async function validateEndpoint(
   }
 
   const apiKey = ep.api_keys;
-  
+
+  // Rate limit note: in serverless environments, per-minute rate limiting via
+  // in-memory stores is unreliable. Budget limits via usage_logs are the primary
+  // control mechanism. Keep the configured value as a warning for awareness.
   if (apiKey.rate_limit_per_minute) {
-    const rateLimitKey = `${apiKey.id}:${Math.floor(Date.now() / 60000)}`;
-    const state = rateLimitStore.get(rateLimitKey);
-    
-    if (state && state.count >= apiKey.rate_limit_per_minute) {
-      errors.push({
-        code: "RATE_LIMIT_EXCEEDED",
-        message: `Rate limit exceeded: ${apiKey.rate_limit_per_minute} requests per minute`,
-        field: "rate_limit_per_minute",
-        value: apiKey.rate_limit_per_minute,
-      });
-    } else {
-      warnings.push({
-        code: "RATE_LIMIT_WARNING",
-        message: `Rate limit: ${state?.count || 0}/${apiKey.rate_limit_per_minute} requests used this minute`,
-        field: "rate_limit_per_minute",
-        value: { used: state?.count || 0, limit: apiKey.rate_limit_per_minute },
-      });
-    }
+    warnings.push({
+      code: "RATE_LIMIT_NOTE",
+      message: `Rate limit configured: ${apiKey.rate_limit_per_minute} req/min (best-effort in serverless)`,
+      field: "rate_limit_per_minute",
+      value: apiKey.rate_limit_per_minute,
+    });
   }
 
   const estimatedCost = estimateCost(
@@ -228,49 +176,6 @@ export async function validateEndpoint(
     });
   }
 
-  if (apiKey.monthly_budget) {
-    const monthlyUsage = await getMonthlyUsage(supabase, apiKey.id);
-    const remaining = apiKey.monthly_budget - monthlyUsage;
-    
-    if (remaining <= 0) {
-      errors.push({
-        code: "MONTHLY_BUDGET_EXCEEDED",
-        message: "Monthly budget has been exceeded",
-        field: "monthly_budget",
-        value: { used: monthlyUsage, budget: apiKey.monthly_budget },
-      });
-    } else if (remaining < apiKey.monthly_budget * 0.2) {
-      warnings.push({
-        code: "LOW_MONTHLY_BUDGET",
-        message: `Monthly budget is low: $${remaining.toFixed(2)} remaining`,
-        field: "monthly_budget",
-        value: { used: monthlyUsage, budget: apiKey.monthly_budget },
-      });
-    }
-  }
-
-  const globalBudgets = await getGlobalBudgets(supabase, userId);
-  for (const budget of globalBudgets) {
-    const usage = await getBudgetUsage(supabase, userId, budget);
-    const remaining = budget.amount - usage;
-    
-    if (remaining <= 0 && budget.hard_limit) {
-      errors.push({
-        code: "GLOBAL_BUDGET_EXCEEDED",
-        message: `Global ${budget.period} budget exceeded ($${budget.amount})`,
-        field: "budget",
-        value: { scope: budget.scope, period: budget.period, used: usage, budget: budget.amount },
-      });
-    } else if (budget.warning_threshold && remaining / budget.amount < budget.warning_threshold) {
-      warnings.push({
-        code: "GLOBAL_BUDGET_WARNING",
-        message: `Global ${budget.period} budget warning: $${remaining.toFixed(2)} remaining`,
-        field: "budget",
-        value: { scope: budget.scope, period: budget.period, used: usage, budget: budget.amount },
-      });
-    }
-  }
-
   return {
     valid: errors.length === 0,
     errors,
@@ -283,83 +188,6 @@ export async function validateEndpoint(
 function estimateCost(inputTokens: number, inputPrice: number, outputPrice: number): number {
   const estimatedOutputTokens = Math.round(inputTokens * 0.5);
   return (inputTokens / 1000000) * inputPrice + (estimatedOutputTokens / 1000000) * outputPrice;
-}
-
-async function getMonthlyUsage(supabase: SupabaseClient, apiKeyId: string): Promise<number> {
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  
-  const { data } = await supabase
-    .from("usage_logs")
-    .select("estimated_cost")
-    .eq("api_key_id", apiKeyId)
-    .gte("created_at", startOfMonth);
-
-  if (!data) return 0;
-  return data.reduce((sum: number, log: Record<string, unknown>) => sum + ((log.estimated_cost as number) || 0), 0);
-}
-
-async function getGlobalBudgets(supabase: SupabaseClient, userId: string): Promise<BudgetData[]> {
-  const { data } = await supabase
-    .from("budgets")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .in("scope", ["global"]);
-
-  return (data || []) as unknown as BudgetData[];
-}
-
-async function getBudgetUsage(supabase: SupabaseClient, userId: string, budget: BudgetData): Promise<number> {
-  const now = new Date();
-  let startDate: string;
-
-  switch (budget.period) {
-    case "daily":
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      break;
-    case "weekly": {
-      const dayOfWeek = now.getDay();
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).toISOString();
-      break;
-    }
-    case "monthly":
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      break;
-    case "yearly":
-      startDate = new Date(now.getFullYear(), 0, 1).toISOString();
-      break;
-    default:
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  }
-
-  const { data } = await supabase
-    .from("usage_logs")
-    .select("estimated_cost")
-    .eq("user_id", userId)
-    .gte("created_at", startDate);
-
-  if (!data) return 0;
-  return data.reduce((sum: number, log: Record<string, unknown>) => sum + ((log.estimated_cost as number) || 0), 0);
-}
-
-export function incrementRateLimit(apiKeyId: string, _limit: number): void {
-  const now = Date.now();
-  const minuteKey = Math.floor(now / 60000);
-  const key = `${apiKeyId}:${minuteKey}`;
-  
-  const state = rateLimitStore.get(key);
-  if (state) {
-    state.count++;
-  } else {
-    rateLimitStore.set(key, { count: 1, reset_at: (minuteKey + 1) * 60000 });
-  }
-
-  for (const [k, v] of rateLimitStore.entries()) {
-    if (v.reset_at < now) {
-      rateLimitStore.delete(k);
-    }
-  }
 }
 
 export function estimateTokensFromMessages(messages: Array<{ role: string; content: string }>): number {

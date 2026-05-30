@@ -1,47 +1,44 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuthParams, parseJsonBody, pickFields, handleDbError } from "@/lib/api-handler";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const TEMPLATE_SELECT = "id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at";
+const ALLOWED_UPDATE_FIELDS = ["name", "task_type", "system_prompt", "user_prompt_template", "variables", "default_strategy", "default_temperature", "default_save_policy", "status", "notes"];
 
-  const { id } = await params;
+export const GET = withAuthParams(async ({ user, supabase }, _req, { id }) => {
   const { data, error } = await supabase
     .from("prompt_templates")
-    .select("id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at")
+    .select(TEMPLATE_SELECT)
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
+
+  if (error) return handleDbError(error, 404);
   return NextResponse.json({ data });
-}
+});
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const PUT = withAuthParams(async ({ user, supabase }, request, { id }) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
 
-  const { id } = await params;
-  const body = await request.json();
+  const update = pickFields(parsed.body, ALLOWED_UPDATE_FIELDS);
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
   const { data, error } = await supabase
     .from("prompt_templates")
-    .update(body)
+    .update(update)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, user_id, name, task_type, system_prompt, user_prompt_template, default_strategy, default_temperature, status, notes, created_at, updated_at")
+    .select(TEMPLATE_SELECT)
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { id } = await params;
+export const DELETE = withAuthParams(async ({ user, supabase }, _req, { id }) => {
   const { error } = await supabase.from("prompt_templates").delete().eq("id", id).eq("user_id", user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ success: true });
-}
+});

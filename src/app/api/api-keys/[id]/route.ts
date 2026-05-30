@@ -1,60 +1,58 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { encrypt, createKeyPreview } from "@/lib/crypto";
+import { withAuthParams, parseJsonBody, pickFields, handleDbError } from "@/lib/api-handler";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const API_KEY_SELECT = "id, user_id, subscription_id, provider_id, key_alias, key_preview, base_url, status, allowed_tasks, blocked_tasks, monthly_budget, single_call_budget, rate_limit_per_minute, max_parallel_requests, last_used_at, last_checked_at, failure_count, notes, created_at, updated_at";
 
-  const { id } = await params;
+const ALLOWED_UPDATE_FIELDS = [
+  "subscription_id", "provider_id", "key_alias", "base_url", "status",
+  "allowed_tasks", "blocked_tasks", "monthly_budget", "single_call_budget",
+  "rate_limit_per_minute", "max_parallel_requests", "notes",
+];
+
+export const GET = withAuthParams(async ({ user, supabase }, _req, { id }) => {
   const { data, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, subscription_id, provider_id, key_alias, key_preview, base_url, status, allowed_tasks, blocked_tasks, monthly_budget, single_call_budget, rate_limit_per_minute, max_parallel_requests, last_used_at, last_checked_at, failure_count, notes, created_at, updated_at")
+    .select(API_KEY_SELECT)
     .eq("id", id)
+    .eq("user_id", user.id)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
+  if (error) return handleDbError(error, 404);
   return NextResponse.json({ data });
-}
+});
 
-export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const PUT = withAuthParams(async ({ user, supabase }, request, { id }) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+  const { plaintext_key, ...rest } = parsed.body;
 
-  const { id } = await params;
-  const body = await request.json();
-  const { plaintext_key, ...rest } = body;
+  const updateData = pickFields(rest, ALLOWED_UPDATE_FIELDS);
 
-  const updateData: Record<string, unknown> = { ...rest };
   if (plaintext_key) {
-    updateData.encrypted_key = encrypt(plaintext_key);
-    updateData.key_preview = createKeyPreview(plaintext_key);
+    updateData.encrypted_key = encrypt(plaintext_key as string);
+    updateData.key_preview = createKeyPreview(plaintext_key as string);
   }
 
   const { data, error } = await supabase
     .from("api_keys")
     .update(updateData)
     .eq("id", id)
-    .select("id, user_id, subscription_id, provider_id, key_alias, key_preview, base_url, status, allowed_tasks, blocked_tasks, monthly_budget, single_call_budget, rate_limit_per_minute, max_parallel_requests, last_used_at, last_checked_at, failure_count, notes, created_at, updated_at")
+    .eq("user_id", user.id)
+    .select(API_KEY_SELECT)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { id } = await params;
+export const DELETE = withAuthParams(async ({ user, supabase }, _req, { id }) => {
   const { error } = await supabase
     .from("api_keys")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ success: true });
-}
+});

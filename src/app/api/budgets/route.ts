@@ -1,34 +1,41 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuth, parseJsonBody, handleDbError } from "@/lib/api-handler";
 
-export async function GET() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const BUDGET_SELECT = "id, user_id, scope, scope_id, period, amount, currency, warning_threshold, hard_limit, status, created_at, updated_at";
 
+export const GET = withAuth(async ({ user, supabase }) => {
   const { data, error } = await supabase
     .from("budgets")
-    .select("id, user_id, scope, scope_id, period, amount, currency, warning_threshold, hard_limit, status, created_at, updated_at")
+    .select(BUDGET_SELECT)
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data });
-}
+});
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const POST = withAuth(async ({ user, supabase }, request) => {
+  const parsed = await parseJsonBody(request);
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.body;
 
-  const body = await request.json();
   const { data, error } = await supabase
     .from("budgets")
-    .insert({ ...body, user_id: user.id })
-    .select("id, user_id, scope, scope_id, period, amount, currency, warning_threshold, hard_limit, status, created_at, updated_at")
+    .insert({
+      scope: body.scope as string,
+      scope_id: (body.scope_id as string) || null,
+      period: (body.period as string) || "monthly",
+      amount: body.amount as number,
+      currency: (body.currency as string) || "USD",
+      warning_threshold: (body.warning_threshold as number) || null,
+      hard_limit: (body.hard_limit as boolean) ?? true,
+      status: (body.status as string) || "active",
+      user_id: user.id,
+    })
+    .select(BUDGET_SELECT)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return handleDbError(error);
   return NextResponse.json({ data }, { status: 201 });
-}
+});

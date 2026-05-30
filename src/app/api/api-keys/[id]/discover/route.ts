@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { withAuthParams } from "@/lib/api-handler";
 import { decrypt } from "@/lib/crypto";
 import { getAdapter } from "@/lib/providers";
+import type { ProviderType } from "@/types/database";
 
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { id } = await params;
+export const POST = withAuthParams(async ({ user, supabase }, _req, { id }) => {
 
   const { data: apiKey, error: apiKeyError } = await supabase
     .from("api_keys")
@@ -37,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Failed to decrypt API key" }, { status: 500 });
   }
 
-  const adapter = getAdapter(provider.provider_type as "openai_compatible" | "anthropic" | "gemini" | "custom");
+  const adapter = getAdapter(provider.provider_type as ProviderType);
   const baseUrl = apiKey.base_url || provider.base_url;
 
   let discoveryResult;
@@ -55,7 +51,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       unavailable_count: 0,
       error_message: String(err),
     });
-    return NextResponse.json({ error: "Discovery failed", detail: String(err) }, { status: 500 });
+    return NextResponse.json({ error: "Discovery failed" }, { status: 500 });
   }
 
   const discoveredModels = discoveryResult.models;
@@ -76,35 +72,42 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   );
 
   const seenModelIds = new Set<string>();
+  const modelsToUpdate: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const endpointsToInsert: Array<Record<string, unknown>> = [];
+  const endpointsToUpdate: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const existingModelMap = new Map<string, string>();
+
+  // Pre-fetch all existing models for this provider
+  const { data: existingModels } = await supabase
+    .from("models")
+    .select("id, provider_model_id")
+    .eq("user_id", user.id)
+    .eq("provider_id", provider.id);
+
+  for (const m of existingModels || []) {
+    existingModelMap.set(m.provider_model_id as string, m.id as string);
+  }
 
   for (const model of discoveredModels) {
     seenModelIds.add(model.id);
-
-    const { data: existingModel } = await supabase
-      .from("models")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("provider_id", provider.id)
-      .eq("provider_model_id", model.id)
-      .single();
+    const existingModelId = existingModelMap.get(model.id);
 
     let modelId: string;
 
-    if (existingModel) {
-      modelId = existingModel.id;
-      const { error: updateErr } = await supabase
-        .from("models")
-        .update({
+    if (existingModelId) {
+      modelId = existingModelId;
+      modelsToUpdate.push({
+        id: modelId,
+        data: {
           display_name: model.name || model.id,
           context_length: model.context_length,
           updated_at: new Date().toISOString(),
-        })
-        .eq("id", modelId);
-      if (updateErr) {
-        endpointErrorMessages.push(`Model update failed (${model.id}): ${updateErr.message}`);
-      }
+        },
+      });
       modelsUpdated++;
     } else {
+      // We need to insert and get IDs back. For correctness with new models,
+      // insert one-by-one to capture returned IDs (endpoints depend on them).
       const { data: newModel, error: modelError } = await supabase
         .from("models")
         .insert({
@@ -128,20 +131,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const existingEndpoint = existingEndpointMap.get(model.id);
     if (existingEndpoint) {
-      const { error: epUpdateErr } = await supabase
-        .from("model_endpoints")
-        .update({
+      endpointsToUpdate.push({
+        id: (existingEndpoint as Record<string, unknown>).id as string,
+        data: {
           is_available: true,
           last_seen_at: new Date().toISOString(),
-        })
-        .eq("id", (existingEndpoint as Record<string, unknown>).id);
-      if (epUpdateErr) {
-        endpointErrorMessages.push(`Endpoint update failed (${model.id}): ${epUpdateErr.message}`);
-      } else {
-        endpointsUpdated++;
-      }
+        },
+      });
+      endpointsUpdated++;
     } else {
-      const { error: epInsertErr } = await supabase.from("model_endpoints").insert({
+      endpointsToInsert.push({
         user_id: user.id,
         api_key_id: id,
         model_id: modelId,
@@ -153,23 +152,58 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         discovered_at: new Date().toISOString(),
         last_seen_at: new Date().toISOString(),
       });
-      if (epInsertErr) {
-        endpointErrorMessages.push(`Endpoint insert failed (${model.id}): ${epInsertErr.message}`);
-      } else {
-        endpointsAdded++;
+      endpointsAdded++;
+    }
+  }
+
+  // Batch update models
+  if (modelsToUpdate.length > 0) {
+    const updatePromises = modelsToUpdate.map((m) =>
+      supabase.from("models").update(m.data).eq("id", m.id)
+    );
+    const results = await Promise.allSettled(updatePromises);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        endpointErrorMessages.push(`Model update failed: ${r.reason}`);
       }
     }
   }
 
-  for (const [providerModelId, endpoint] of existingEndpointMap) {
-    if (!seenModelIds.has(providerModelId)) {
-      await supabase
-        .from("model_endpoints")
-        .update({ is_available: false })
-        .eq("id", (endpoint as Record<string, unknown>).id);
-      unavailableCount++;
+  // Batch insert endpoints
+  if (endpointsToInsert.length > 0) {
+    const { error: epBatchErr } = await supabase.from("model_endpoints").insert(endpointsToInsert);
+    if (epBatchErr) {
+      endpointErrorMessages.push(`Endpoint batch insert failed: ${epBatchErr.message}`);
     }
   }
+
+  // Batch update endpoints
+  if (endpointsToUpdate.length > 0) {
+    const updatePromises = endpointsToUpdate.map((e) =>
+      supabase.from("model_endpoints").update(e.data).eq("id", e.id)
+    );
+    const results = await Promise.allSettled(updatePromises);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        endpointErrorMessages.push(`Endpoint update failed: ${r.reason}`);
+      }
+    }
+  }
+
+  // Mark unseen endpoints as unavailable in batch
+  const unseenEndpointIds: string[] = [];
+  for (const [providerModelId, endpoint] of existingEndpointMap) {
+    if (!seenModelIds.has(providerModelId)) {
+      unseenEndpointIds.push((endpoint as Record<string, unknown>).id as string);
+    }
+  }
+  if (unseenEndpointIds.length > 0) {
+    await supabase
+      .from("model_endpoints")
+      .update({ is_available: false })
+      .in("id", unseenEndpointIds);
+  }
+  unavailableCount = unseenEndpointIds.length;
 
   const discoveryStatus = endpointErrorMessages.length > 0 ? "partial" : "success";
 
@@ -203,4 +237,4 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       errors: endpointErrorMessages.length > 0 ? endpointErrorMessages : undefined,
     },
   });
-}
+});
